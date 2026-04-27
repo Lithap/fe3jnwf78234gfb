@@ -47,7 +47,7 @@ namespace RetroRec_Server.Controllers
         }
 
         [HttpGet("/api/challenge/v2/getCurrent")]
-        public IActionResult Challenge() => Pascal(new
+        public new IActionResult Challenge() => Pascal(new
         {
             ChallengeMapId = 0,
             StartAt = "2021-12-27T21:27:38.188Z",
