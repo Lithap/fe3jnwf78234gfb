@@ -477,6 +477,7 @@ namespace RetroRec_Server.Controllers
 
             try
             {
+                var values = await CollectRequestValuesAsync();
                 using var reader = new StreamReader(Request.Body);
                 var body = await reader.ReadToEndAsync();
 
@@ -484,11 +485,10 @@ namespace RetroRec_Server.Controllers
                 var room = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
                 if (room != null)
                 {
-                    if (string.IsNullOrWhiteSpace(body))
-                    {
-                        var values = await CollectRequestValuesAsync();
-                        body = GetStringValue(values, "dataBlob", "DataBlob", "data", "blob", "payload") ?? "";
-                    }
+                    // Some client builds send data in form/json fields instead of raw body.
+                    var payloadValue = GetStringValue(values, "dataBlob", "DataBlob", "data", "blob", "payload");
+                    if (!string.IsNullOrWhiteSpace(payloadValue))
+                        body = payloadValue;
 
                     room.DataBlob = body ?? "";
                     room.ModifiedAt = DateTime.UtcNow;
