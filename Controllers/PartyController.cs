@@ -17,17 +17,100 @@ namespace RetroRec_Server.Controllers
             if (myId == 0) myId = 2;
             var pending = PartyState.Invites.Values
                 .Where(i => i.TargetId == myId)
+                // Drop expired invites so stale "X wants to go with you"
+                // notifications stop popping up after the party has moved on.
+                .Where(i => i.CreatedAt.AddMinutes(5) > DateTime.UtcNow)
                 .Select(i => new
                 {
-                    inviteId = i.InviteId,
-                    senderAccountId = i.SenderId,
-                    roomName = i.RoomName,
-                    roomId = i.RoomId,
-                    isPartyInvite = i.IsPartyInvite,
-                    createdAt = i.CreatedAt,
-                    expiresAt = i.CreatedAt.AddMinutes(5)
-                });
-            return Ok(pending);
+                    InviteId = i.InviteId,
+                    SenderAccountId = i.SenderId,
+                    RoomName = i.RoomName,
+                    RoomId = i.RoomId,
+                    IsPartyInvite = i.IsPartyInvite,
+                    CreatedAt = i.CreatedAt,
+                    ExpiresAt = i.CreatedAt.AddMinutes(5)
+                })
+                .ToList();
+            return Pascal(pending);
+        }
+
+        // Pull the target id + room hints from form fields, query string, or
+        // a JSON body. The client's invite UI flips between content types
+        // depending on what menu opened it; supporting all three is what
+        // makes party invites work consistently instead of "sometimes".
+        private (int targetId, string roomName, int roomId) ReadInviteFields(Dictionary<string, string> form)
+        {
+            string targetStr = null, roomName = null, roomIdStr = null;
+
+            if (form != null)
+            {
+                form.TryGetValue("targetAccountId", out targetStr);
+                if (string.IsNullOrEmpty(targetStr)) form.TryGetValue("targetId", out targetStr);
+                if (string.IsNullOrEmpty(targetStr)) form.TryGetValue("accountId", out targetStr);
+                form.TryGetValue("roomName", out roomName);
+                form.TryGetValue("roomId", out roomIdStr);
+            }
+
+            if (string.IsNullOrEmpty(targetStr))
+            {
+                foreach (var key in new[] { "targetAccountId", "targetId", "accountId" })
+                {
+                    if (Request.Query.TryGetValue(key, out var v) && !string.IsNullOrEmpty(v))
+                    { targetStr = v; break; }
+                }
+                if (string.IsNullOrEmpty(roomName) && Request.Query.TryGetValue("roomName", out var rn))
+                    roomName = rn;
+                if (string.IsNullOrEmpty(roomIdStr) && Request.Query.TryGetValue("roomId", out var ri))
+                    roomIdStr = ri;
+            }
+
+            if (string.IsNullOrEmpty(targetStr) &&
+                (Request.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false))
+            {
+                try
+                {
+                    Request.EnableBuffering();
+                    Request.Body.Position = 0;
+                    using var reader = new StreamReader(Request.Body, leaveOpen: true);
+                    var body = reader.ReadToEnd();
+                    Request.Body.Position = 0;
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(body);
+                        foreach (var key in new[] { "targetAccountId", "TargetAccountId", "targetId", "TargetId", "accountId", "AccountId" })
+                        {
+                            if (doc.RootElement.TryGetProperty(key, out var el))
+                            {
+                                if (el.ValueKind == System.Text.Json.JsonValueKind.Number) targetStr = el.GetRawText();
+                                else if (el.ValueKind == System.Text.Json.JsonValueKind.String) targetStr = el.GetString();
+                                if (!string.IsNullOrEmpty(targetStr)) break;
+                            }
+                        }
+                        foreach (var key in new[] { "roomName", "RoomName" })
+                        {
+                            if (string.IsNullOrEmpty(roomName) &&
+                                doc.RootElement.TryGetProperty(key, out var el) &&
+                                el.ValueKind == System.Text.Json.JsonValueKind.String)
+                                roomName = el.GetString();
+                        }
+                        foreach (var key in new[] { "roomId", "RoomId" })
+                        {
+                            if (string.IsNullOrEmpty(roomIdStr) &&
+                                doc.RootElement.TryGetProperty(key, out var el))
+                            {
+                                roomIdStr = el.ValueKind == System.Text.Json.JsonValueKind.Number
+                                    ? el.GetRawText()
+                                    : el.GetString();
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            int.TryParse(targetStr, out var targetId);
+            int.TryParse(roomIdStr, out var roomId);
+            return (targetId, roomName, roomId);
         }
 
         [HttpPost("/api/invites/v1")]
@@ -39,11 +122,10 @@ namespace RetroRec_Server.Controllers
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
 
-            form.TryGetValue("targetAccountId", out var targetStr);
-            form.TryGetValue("roomName", out var roomName);
-            form.TryGetValue("roomId", out var roomIdStr);
+            var (targetId, roomName, roomIdParsed) = ReadInviteFields(form);
 
-            if (!int.TryParse(targetStr, out var targetId)) return BadRequest();
+            if (targetId == 0)
+                return Pascal(new { ErrorCode = 1, Error = "missing_target" });
 
             UserRoomInstances.TryGetValue(myId, out var myRoomObj);
             var invRoomName = "DormRoom";
@@ -59,21 +141,51 @@ namespace RetroRec_Server.Controllers
                 catch { }
             }
             if (!string.IsNullOrWhiteSpace(roomName)) invRoomName = roomName;
-            if (int.TryParse(roomIdStr, out var parsedRoomId) && parsedRoomId != 0) invRoomId = parsedRoomId;
+            if (roomIdParsed != 0) invRoomId = roomIdParsed;
 
-            var inviteId = $"inv_{myId}_{targetId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
-            PartyState.Invites[inviteId] = new InviteData
+            // De-dupe: if there's already an outstanding invite from me to
+            // this player for the same room, refresh its timestamp instead
+            // of stacking another notification on top of the existing one.
+            // That matches the "I keep getting the same invite popup over
+            // and over" symptom the user described.
+            var existing = PartyState.Invites
+                .FirstOrDefault(kv => kv.Value.SenderId == myId &&
+                                      kv.Value.TargetId == targetId &&
+                                      kv.Value.RoomId == invRoomId);
+            string inviteId;
+            if (!string.IsNullOrEmpty(existing.Key))
             {
+                inviteId = existing.Key;
+                existing.Value.RoomName = invRoomName;
+                existing.Value.CreatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                inviteId = $"inv_{myId}_{targetId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+                PartyState.Invites[inviteId] = new InviteData
+                {
+                    InviteId = inviteId,
+                    SenderId = myId,
+                    TargetId = targetId,
+                    RoomName = invRoomName,
+                    RoomId = invRoomId,
+                    IsPartyInvite = true,
+                    CreatedAt = DateTime.UtcNow
+                };
+            }
+
+            return Pascal(new
+            {
+                ErrorCode = 0,
                 InviteId = inviteId,
-                SenderId = myId,
-                TargetId = targetId,
+                SenderAccountId = myId,
+                TargetAccountId = targetId,
                 RoomName = invRoomName,
                 RoomId = invRoomId,
                 IsPartyInvite = true,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            return Ok(new { inviteId = inviteId });
+                CreatedAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddMinutes(5)
+            });
         }
 
         [HttpPost("/api/invites/v1/{inviteId}/accept")]
@@ -84,20 +196,29 @@ namespace RetroRec_Server.Controllers
             if (myId == 0) myId = 2;
 
             if (!PartyState.Invites.TryRemove(inviteId, out var invite))
-                return Ok(new { });
+                return Pascal(new { ErrorCode = 0 });
 
             if (invite.IsPartyInvite)
                 PartyState.MemberOf[myId] = invite.SenderId;
 
-            return Ok(new { roomName = invite.RoomName, roomId = invite.RoomId });
+            return Pascal(new
+            {
+                ErrorCode = 0,
+                RoomName = invite.RoomName,
+                RoomId = invite.RoomId,
+                LeaderId = invite.SenderId,
+                IsPartyInvite = invite.IsPartyInvite
+            });
         }
 
         [HttpDelete("/api/invites/v1/{inviteId}")]
         [HttpDelete("/invites/v1/{inviteId}")]
+        [HttpPost("/api/invites/v1/{inviteId}/decline")]
+        [HttpPost("/invites/v1/{inviteId}/decline")]
         public IActionResult DeclineInvite(string inviteId)
         {
             PartyState.Invites.TryRemove(inviteId, out _);
-            return Ok(new { });
+            return Pascal(new { ErrorCode = 0 });
         }
 
         [HttpPost("/api/party/v1/leave")]

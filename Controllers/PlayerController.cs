@@ -352,6 +352,63 @@ namespace RetroRec_Server.Controllers
             return Pascal(results);
         }
 
+        // Resolves the "other player's id" from any of the half-dozen places
+        // the client puts it: path segment, query string, form body, or JSON
+        // body. Without all of these, friend requests silently no-op because
+        // the client posts targetAccountId in the form body but the old code
+        // only read [FromQuery]. That's why "friend request just fails completely".
+        private int ResolveFriendIdFromRequest(int routeId, int qId, int qAccountId, int qTargetId, int qTargetAccountId)
+        {
+            if (routeId != 0) return routeId;
+            if (qId != 0) return qId;
+            if (qAccountId != 0) return qAccountId;
+            if (qTargetId != 0) return qTargetId;
+            if (qTargetAccountId != 0) return qTargetAccountId;
+
+            try
+            {
+                if (Request.HasFormContentType)
+                {
+                    foreach (var key in new[] { "id", "accountId", "targetId", "targetAccountId", "playerId" })
+                    {
+                        if (Request.Form.TryGetValue(key, out var v) && int.TryParse(v, out var parsed) && parsed != 0)
+                            return parsed;
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                if (Request.ContentLength.GetValueOrDefault() > 0 &&
+                    (Request.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false))
+                {
+                    Request.EnableBuffering();
+                    Request.Body.Position = 0;
+                    using var reader = new StreamReader(Request.Body, leaveOpen: true);
+                    var body = reader.ReadToEnd();
+                    Request.Body.Position = 0;
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(body);
+                        foreach (var key in new[] { "id", "accountId", "targetId", "targetAccountId", "playerId" })
+                        {
+                            if (doc.RootElement.TryGetProperty(key, out var el))
+                            {
+                                if (el.ValueKind == System.Text.Json.JsonValueKind.Number && el.TryGetInt32(out var n) && n != 0)
+                                    return n;
+                                if (el.ValueKind == System.Text.Json.JsonValueKind.String && int.TryParse(el.GetString(), out var sn) && sn != 0)
+                                    return sn;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return 0;
+        }
+
         [HttpGet("/api/relationships/v2/addfriend")]
         [HttpPost("/api/relationships/v2/addfriend")]
         [HttpGet("/relationships/v2/addfriend")]
@@ -360,7 +417,23 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/relationships/v2/sendfriendrequest")]
         [HttpGet("/relationships/v2/sendfriendrequest")]
         [HttpPost("/relationships/v2/sendfriendrequest")]
+        // Path-style variants — client sometimes posts the id as the last
+        // path segment (e.g. POST /api/relationships/v2/addfriend/1234).
+        [HttpGet("/api/relationships/v2/addfriend/{routeId:int}")]
+        [HttpPost("/api/relationships/v2/addfriend/{routeId:int}")]
+        [HttpGet("/relationships/v2/addfriend/{routeId:int}")]
+        [HttpPost("/relationships/v2/addfriend/{routeId:int}")]
+        [HttpGet("/api/relationships/v2/sendfriendrequest/{routeId:int}")]
+        [HttpPost("/api/relationships/v2/sendfriendrequest/{routeId:int}")]
+        [HttpGet("/relationships/v2/sendfriendrequest/{routeId:int}")]
+        [HttpPost("/relationships/v2/sendfriendrequest/{routeId:int}")]
+        // Some client builds POST to /api/relationships/v2/{id}/addfriend
+        [HttpPost("/api/relationships/v2/{routeId:int}/addfriend")]
+        [HttpPost("/relationships/v2/{routeId:int}/addfriend")]
+        [HttpPost("/api/relationships/v2/{routeId:int}/sendfriendrequest")]
+        [HttpPost("/relationships/v2/{routeId:int}/sendfriendrequest")]
         public IActionResult AddFriend(
+            int routeId = 0,
             [FromQuery] int id = 0,
             [FromQuery] int accountId = 0,
             [FromQuery] int targetId = 0,
@@ -368,21 +441,39 @@ namespace RetroRec_Server.Controllers
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
-            int friendId = id != 0 ? id
-                         : accountId != 0 ? accountId
-                         : targetId != 0 ? targetId
-                         : targetAccountId;
-            if (friendId == 0) return Pascal(new { ErrorCode = 0 });
+
+            int friendId = ResolveFriendIdFromRequest(routeId, id, accountId, targetId, targetAccountId);
+            if (friendId == 0 || friendId == myId)
+                return Pascal(new { ErrorCode = 0, SubjectAccountId = myId, ObjectAccountId = friendId, Type = 0 });
+
             PartyState.FriendRequests.TryAdd($"{myId}_{friendId}", true);
             bool mutual = PartyState.FriendRequests.ContainsKey($"{friendId}_{myId}");
-            return Pascal(new { ErrorCode = 0, SubjectAccountId = myId, ObjectAccountId = friendId, Type = mutual ? 4 : 2 });
+            return Pascal(new
+            {
+                ErrorCode = 0,
+                SubjectAccountId = myId,
+                ObjectAccountId = friendId,
+                Type = mutual ? 4 : 2
+            });
         }
 
         [HttpGet("/api/relationships/v2/removefriend")]
         [HttpPost("/api/relationships/v2/removefriend")]
         [HttpGet("/relationships/v2/removefriend")]
         [HttpPost("/relationships/v2/removefriend")]
+        [HttpGet("/api/relationships/v2/removefriend/{routeId:int}")]
+        [HttpPost("/api/relationships/v2/removefriend/{routeId:int}")]
+        [HttpGet("/relationships/v2/removefriend/{routeId:int}")]
+        [HttpPost("/relationships/v2/removefriend/{routeId:int}")]
+        [HttpPost("/api/relationships/v2/{routeId:int}/removefriend")]
+        [HttpPost("/relationships/v2/{routeId:int}/removefriend")]
+        // "Decline incoming request" is just a remove on the inbound side.
+        [HttpPost("/api/relationships/v2/declinefriendrequest")]
+        [HttpPost("/relationships/v2/declinefriendrequest")]
+        [HttpPost("/api/relationships/v2/declinefriendrequest/{routeId:int}")]
+        [HttpPost("/relationships/v2/declinefriendrequest/{routeId:int}")]
         public IActionResult RemoveFriend(
+            int routeId = 0,
             [FromQuery] int id = 0,
             [FromQuery] int accountId = 0,
             [FromQuery] int targetId = 0,
@@ -390,14 +481,13 @@ namespace RetroRec_Server.Controllers
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
-            int friendId = id != 0 ? id
-                         : accountId != 0 ? accountId
-                         : targetId != 0 ? targetId
-                         : targetAccountId;
-            if (friendId == 0) return Ok(new { });
+
+            int friendId = ResolveFriendIdFromRequest(routeId, id, accountId, targetId, targetAccountId);
+            if (friendId == 0) return Ok(new { ErrorCode = 0 });
+
             PartyState.FriendRequests.TryRemove($"{myId}_{friendId}", out _);
             PartyState.FriendRequests.TryRemove($"{friendId}_{myId}", out _);
-            return Ok(new { });
+            return Ok(new { ErrorCode = 0 });
         }
 
         [HttpGet("/api/relationships/v2/block")]
