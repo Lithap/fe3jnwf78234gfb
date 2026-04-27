@@ -151,6 +151,7 @@ namespace RetroRec_Server.Controllers
             var tag = u.IsPublished ? "community" : "rro";
             return new
             {
+                ErrorCode = 0,
                 RoomId = roomIdForResponse,
                 Name = u.Name,
                 Description = u.Description ?? "",
@@ -199,6 +200,8 @@ namespace RetroRec_Server.Controllers
                 LoadScreens = new object[] { }
             };
         }
+
+        private object BuildRoomSuccess(UserRoom room) => ExpandUserRoom(room);
 
         private object BuildDormRoom(int roomId)
         {
@@ -384,12 +387,23 @@ namespace RetroRec_Server.Controllers
         // copying the scene/template from the base room.
         [HttpPost("/rooms/{roomId:int}/clone")]
         [HttpPost("/api/rooms/{roomId:int}/clone")]
-        public IActionResult CloneRoom(int roomId, [FromForm] string name = null, [FromQuery] string nameQ = null)
+        public async Task<IActionResult> CloneRoom(int roomId, [FromForm] string name = null, [FromQuery] string nameQ = null)
         {
             int callerId = GetAccountIdFromAuth();
             if (callerId == 0) callerId = 2;
 
-            var roomName = string.IsNullOrWhiteSpace(name) ? nameQ : name;
+            var values = await ReadRequestValuesAsync();
+            values.TryGetValue("name", out var bodyName);
+            values.TryGetValue("Name", out var bodyNamePascal);
+            values.TryGetValue("description", out var bodyDescription);
+            values.TryGetValue("Description", out var bodyDescriptionPascal);
+            var roomName = !string.IsNullOrWhiteSpace(name) ? name
+                : !string.IsNullOrWhiteSpace(nameQ) ? nameQ
+                : !string.IsNullOrWhiteSpace(bodyName) ? bodyName
+                : bodyNamePascal;
+            var description = !string.IsNullOrWhiteSpace(bodyDescriptionPascal)
+                ? bodyDescriptionPascal
+                : bodyDescription;
 
             string templateName, sceneId, imageName;
 
@@ -420,7 +434,7 @@ namespace RetroRec_Server.Controllers
             var newRoom = new UserRoom
             {
                 Name = string.IsNullOrWhiteSpace(roomName) ? $"{templateName} Clone" : roomName,
-                Description = $"Cloned from {templateName}",
+                Description = string.IsNullOrWhiteSpace(description) ? $"Cloned from {templateName}" : description,
                 CreatorAccountId = callerId,
                 BaseRoomId = roomId,
                 UnitySceneId = sceneId,
@@ -436,7 +450,7 @@ namespace RetroRec_Server.Controllers
             db2.UserRooms.Add(newRoom);
             db2.SaveChanges();
 
-            return Pascal(ExpandUserRoom(newRoom));
+            return Pascal(BuildRoomSuccess(newRoom));
         }
 
         // Save room data (e.g. when user edits with maker pen). Stores the
@@ -447,10 +461,16 @@ namespace RetroRec_Server.Controllers
         [HttpPatch("/api/rooms/{roomId:int}")]
         [HttpPost("/rooms/{roomId:int}/save")]
         [HttpPost("/api/rooms/{roomId:int}/save")]
+        [HttpPost("/rooms/{roomId:int}/saveData")]
+        [HttpPost("/api/rooms/{roomId:int}/saveData")]
+        [HttpPost("/rooms/{roomId:int}/savedata")]
+        [HttpPost("/api/rooms/{roomId:int}/savedata")]
         public async Task<IActionResult> SaveRoom(int roomId)
         {
             if (roomId < USER_ROOM_ID_BASE)
-                return Ok(new { });
+                return Pascal(new { ErrorCode = 0 });
+
+            UserRoom room = null;
 
             try
             {
@@ -458,17 +478,42 @@ namespace RetroRec_Server.Controllers
                 var body = await reader.ReadToEndAsync();
 
                 using var db = new RetroRecDb();
-                var room = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
+                room = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
                 if (room != null)
                 {
-                    room.DataBlob = body;
+                    room.DataBlob = ExtractRoomDataBlob(body);
                     room.ModifiedAt = DateTime.UtcNow;
                     db.SaveChanges();
                 }
             }
             catch { }
 
-            return Ok(new { });
+            return room == null
+                ? Pascal(new { ErrorCode = 1, Error = "Room not found" })
+                : Pascal(BuildRoomSuccess(room));
+        }
+
+        private static string ExtractRoomDataBlob(string body)
+        {
+            if (string.IsNullOrWhiteSpace(body)) return "";
+
+            try
+            {
+                using var doc = JsonDocument.Parse(body);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (var name in new[] { "dataBlob", "DataBlob", "data", "Data", "roomData", "RoomData" })
+                    {
+                        if (doc.RootElement.TryGetProperty(name, out var value))
+                            return value.ValueKind == JsonValueKind.String
+                                ? value.GetString() ?? ""
+                                : value.GetRawText();
+                    }
+                }
+            }
+            catch { }
+
+            return body;
         }
 
         // Mark a user room as published — flips IsPublished=true and changes
@@ -722,18 +767,6 @@ namespace RetroRec_Server.Controllers
                 // Immediately update the member's room so their next heartbeat
                 // returns the leader's room instance and the client auto-follows.
                 UserRoomInstances[kvp.Key] = roomInstance;
-
-                var followKey = $"party_{playerId}_{kvp.Key}";
-                PartyState.Invites[followKey] = new InviteData
-                {
-                    InviteId = followKey,
-                    SenderId = playerId,
-                    TargetId = kvp.Key,
-                    RoomName = roomName,
-                    RoomId = roomId,
-                    IsPartyInvite = true,
-                    CreatedAt = DateTime.UtcNow
-                };
             }
 
             return Pascal(new

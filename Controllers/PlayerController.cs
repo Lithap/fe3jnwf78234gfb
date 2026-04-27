@@ -310,17 +310,20 @@ namespace RetroRec_Server.Controllers
         public IActionResult PlatformReferrers() => Ok(new object[] { });
 
         // Returns the caller's relationships with correct directional types:
-        //   type 2 = I sent a request to them (pending outgoing)
-        //   type 3 = They sent a request to me (pending incoming)
-        //   type 4 = Both sent requests = mutual friends
+        //   type 1 = I sent a request to them (pending outgoing)
+        //   type 2 = They sent a request to me (pending incoming)
+        //   type 3 = Both sent requests = mutual friends
         [HttpGet("/api/relationships/v2/get")]
         [HttpGet("/relationships/v2/get")]
+        [HttpGet("/api/relationships/v6/current/friends")]
+        [HttpGet("/relationships/v6/current/friends")]
         public IActionResult RelationshipsV2Get()
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
 
             var results = new List<object>();
+            var seen = new HashSet<int>();
             foreach (var key in PartyState.FriendRequests.Keys)
             {
                 var parts = key.Split('_');
@@ -330,23 +333,29 @@ namespace RetroRec_Server.Controllers
 
                 bool iSent = sender == myId;
                 int otherId = iSent ? target : sender;
+                if (!seen.Add(otherId)) continue;
                 bool theyAlsoSent = PartyState.FriendRequests.ContainsKey($"{otherId}_{myId}");
 
-                if (!iSent && theyAlsoSent) continue;
-
-                int relType;
+                int relationshipType;
                 if (theyAlsoSent)
-                    relType = 4;
+                    relationshipType = 3;
                 else if (iSent)
-                    relType = 2;
+                    relationshipType = 1;
                 else
-                    relType = 3;
+                    relationshipType = 2;
 
                 results.Add(new
                 {
                     SubjectAccountId = iSent ? myId : otherId,
                     ObjectAccountId = iSent ? otherId : myId,
-                    Type = relType
+                    AccountId = otherId,
+                    PlayerId = otherId,
+                    PlayerID = otherId,
+                    Type = relationshipType,
+                    RelationshipType = relationshipType,
+                    Favorited = 0,
+                    Muted = 0,
+                    Ignored = 0
                 });
             }
             return Pascal(results);
@@ -354,13 +363,30 @@ namespace RetroRec_Server.Controllers
 
         [HttpGet("/api/relationships/v2/addfriend")]
         [HttpPost("/api/relationships/v2/addfriend")]
+        [HttpPut("/api/relationships/v2/addfriend")]
+        [HttpGet("/api/relationships/v2/addfriend/{routeId:int}")]
+        [HttpPost("/api/relationships/v2/addfriend/{routeId:int}")]
         [HttpGet("/relationships/v2/addfriend")]
         [HttpPost("/relationships/v2/addfriend")]
+        [HttpPut("/relationships/v2/addfriend")]
+        [HttpGet("/relationships/v2/addfriend/{routeId:int}")]
+        [HttpPost("/relationships/v2/addfriend/{routeId:int}")]
         [HttpGet("/api/relationships/v2/sendfriendrequest")]
         [HttpPost("/api/relationships/v2/sendfriendrequest")]
+        [HttpPut("/api/relationships/v2/sendfriendrequest")]
+        [HttpGet("/api/relationships/v2/sendfriendrequest/{routeId:int}")]
+        [HttpPost("/api/relationships/v2/sendfriendrequest/{routeId:int}")]
         [HttpGet("/relationships/v2/sendfriendrequest")]
         [HttpPost("/relationships/v2/sendfriendrequest")]
-        public IActionResult AddFriend(
+        [HttpPut("/relationships/v2/sendfriendrequest")]
+        [HttpGet("/relationships/v2/sendfriendrequest/{routeId:int}")]
+        [HttpPost("/relationships/v2/sendfriendrequest/{routeId:int}")]
+        [HttpPost("/api/relationships/v6/current/friends")]
+        [HttpPut("/api/relationships/v6/current/friends")]
+        [HttpPost("/relationships/v6/current/friends")]
+        [HttpPut("/relationships/v6/current/friends")]
+        public async Task<IActionResult> AddFriend(
+            int routeId = 0,
             [FromQuery] int id = 0,
             [FromQuery] int accountId = 0,
             [FromQuery] int targetId = 0,
@@ -368,21 +394,52 @@ namespace RetroRec_Server.Controllers
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
-            int friendId = id != 0 ? id
+            var values = await ReadRequestValuesAsync();
+            int friendId = routeId != 0 ? routeId
+                         : id != 0 ? id
                          : accountId != 0 ? accountId
                          : targetId != 0 ? targetId
-                         : targetAccountId;
-            if (friendId == 0) return Pascal(new { ErrorCode = 0 });
+                         : targetAccountId != 0 ? targetAccountId
+                         : GetIntValue(values,
+                             "id", "accountId", "playerId", "targetId", "targetAccountId",
+                             "toAccountId", "recipientAccountId", "objectAccountId", "PlayerID");
+
+            if (friendId == 0 || friendId == myId)
+                return BadRequest(new { ErrorCode = 1, Error = "Missing target account id" });
+
             PartyState.FriendRequests.TryAdd($"{myId}_{friendId}", true);
             bool mutual = PartyState.FriendRequests.ContainsKey($"{friendId}_{myId}");
-            return Pascal(new { ErrorCode = 0, SubjectAccountId = myId, ObjectAccountId = friendId, Type = mutual ? 4 : 2 });
+            var relationshipType = mutual ? 3 : 1;
+            return Pascal(new
+            {
+                ErrorCode = 0,
+                SubjectAccountId = myId,
+                ObjectAccountId = friendId,
+                AccountId = friendId,
+                PlayerId = friendId,
+                PlayerID = friendId,
+                Type = relationshipType,
+                RelationshipType = relationshipType,
+                Favorited = 0,
+                Muted = 0,
+                Ignored = 0
+            });
         }
 
         [HttpGet("/api/relationships/v2/removefriend")]
         [HttpPost("/api/relationships/v2/removefriend")]
+        [HttpDelete("/api/relationships/v2/removefriend")]
+        [HttpGet("/api/relationships/v2/removefriend/{routeId:int}")]
+        [HttpPost("/api/relationships/v2/removefriend/{routeId:int}")]
         [HttpGet("/relationships/v2/removefriend")]
         [HttpPost("/relationships/v2/removefriend")]
-        public IActionResult RemoveFriend(
+        [HttpDelete("/relationships/v2/removefriend")]
+        [HttpGet("/relationships/v2/removefriend/{routeId:int}")]
+        [HttpPost("/relationships/v2/removefriend/{routeId:int}")]
+        [HttpDelete("/api/relationships/v6/current/friends/{routeId:int}")]
+        [HttpDelete("/relationships/v6/current/friends/{routeId:int}")]
+        public async Task<IActionResult> RemoveFriend(
+            int routeId = 0,
             [FromQuery] int id = 0,
             [FromQuery] int accountId = 0,
             [FromQuery] int targetId = 0,
@@ -390,10 +447,15 @@ namespace RetroRec_Server.Controllers
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
-            int friendId = id != 0 ? id
+            var values = await ReadRequestValuesAsync();
+            int friendId = routeId != 0 ? routeId
+                         : id != 0 ? id
                          : accountId != 0 ? accountId
                          : targetId != 0 ? targetId
-                         : targetAccountId;
+                         : targetAccountId != 0 ? targetAccountId
+                         : GetIntValue(values,
+                             "id", "accountId", "playerId", "targetId", "targetAccountId",
+                             "toAccountId", "recipientAccountId", "objectAccountId", "PlayerID");
             if (friendId == 0) return Ok(new { });
             PartyState.FriendRequests.TryRemove($"{myId}_{friendId}", out _);
             PartyState.FriendRequests.TryRemove($"{friendId}_{myId}", out _);

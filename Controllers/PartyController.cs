@@ -16,16 +16,23 @@ namespace RetroRec_Server.Controllers
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
             var pending = PartyState.Invites.Values
-                .Where(i => i.TargetId == myId)
+                .Where(i => i.TargetId == myId && i.IsPartyInvite)
                 .Select(i => new
                 {
                     inviteId = i.InviteId,
+                    InviteId = i.InviteId,
                     senderAccountId = i.SenderId,
+                    SenderAccountId = i.SenderId,
                     roomName = i.RoomName,
+                    RoomName = i.RoomName,
                     roomId = i.RoomId,
+                    RoomId = i.RoomId,
                     isPartyInvite = i.IsPartyInvite,
+                    IsPartyInvite = i.IsPartyInvite,
                     createdAt = i.CreatedAt,
-                    expiresAt = i.CreatedAt.AddMinutes(5)
+                    CreatedAt = i.CreatedAt,
+                    expiresAt = i.CreatedAt.AddMinutes(5),
+                    ExpiresAt = i.CreatedAt.AddMinutes(5)
                 });
             return Ok(pending);
         }
@@ -34,16 +41,26 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/invites/v1/")]
         [HttpPost("/invites/v1")]
         [HttpPost("/invites/v1/")]
-        public IActionResult SendInvite([FromForm] Dictionary<string, string> form)
+        [HttpPost("/api/invites/v1/{routeTargetId:int}")]
+        [HttpPost("/invites/v1/{routeTargetId:int}")]
+        public async Task<IActionResult> SendInvite(int routeTargetId = 0)
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
 
-            form.TryGetValue("targetAccountId", out var targetStr);
-            form.TryGetValue("roomName", out var roomName);
-            form.TryGetValue("roomId", out var roomIdStr);
+            var values = await ReadRequestValuesAsync();
+            var targetId = routeTargetId != 0
+                ? routeTargetId
+                : GetIntValue(values,
+                    "targetAccountId", "targetId", "accountId", "playerId",
+                    "recipientAccountId", "toAccountId", "PlayerID");
+            values.TryGetValue("roomName", out var roomName);
+            values.TryGetValue("RoomName", out var roomNamePascal);
+            values.TryGetValue("roomId", out var roomIdStr);
+            values.TryGetValue("RoomId", out var roomIdStrPascal);
 
-            if (!int.TryParse(targetStr, out var targetId)) return BadRequest();
+            if (targetId == 0 || targetId == myId)
+                return BadRequest(new { ErrorCode = 1, Error = "Missing target account id" });
 
             UserRoomInstances.TryGetValue(myId, out var myRoomObj);
             var invRoomName = "DormRoom";
@@ -58,10 +75,12 @@ namespace RetroRec_Server.Controllers
                 }
                 catch { }
             }
+            if (!string.IsNullOrWhiteSpace(roomNamePascal)) roomName = roomNamePascal;
             if (!string.IsNullOrWhiteSpace(roomName)) invRoomName = roomName;
+            if (string.IsNullOrWhiteSpace(roomIdStr)) roomIdStr = roomIdStrPascal;
             if (int.TryParse(roomIdStr, out var parsedRoomId) && parsedRoomId != 0) invRoomId = parsedRoomId;
 
-            var inviteId = $"inv_{myId}_{targetId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+            var inviteId = $"inv_{myId}_{targetId}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
             PartyState.Invites[inviteId] = new InviteData
             {
                 InviteId = inviteId,
@@ -73,7 +92,7 @@ namespace RetroRec_Server.Controllers
                 CreatedAt = DateTime.UtcNow
             };
 
-            return Ok(new { inviteId = inviteId });
+            return Ok(new { inviteId = inviteId, InviteId = inviteId, ErrorCode = 0 });
         }
 
         [HttpPost("/api/invites/v1/{inviteId}/accept")]
@@ -89,7 +108,15 @@ namespace RetroRec_Server.Controllers
             if (invite.IsPartyInvite)
                 PartyState.MemberOf[myId] = invite.SenderId;
 
-            return Ok(new { roomName = invite.RoomName, roomId = invite.RoomId });
+            return Ok(new
+            {
+                errorCode = 0,
+                ErrorCode = 0,
+                roomName = invite.RoomName,
+                RoomName = invite.RoomName,
+                roomId = invite.RoomId,
+                RoomId = invite.RoomId
+            });
         }
 
         [HttpDelete("/api/invites/v1/{inviteId}")]

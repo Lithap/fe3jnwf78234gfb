@@ -48,6 +48,64 @@ namespace RetroRec_Server.Controllers
             return 0;
         }
 
+        protected async Task<Dictionary<string, string>> ReadRequestValuesAsync()
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var item in Request.Query)
+                values[item.Key] = item.Value.ToString();
+
+            if (Request.HasFormContentType)
+            {
+                foreach (var item in Request.Form)
+                    values[item.Key] = item.Value.ToString();
+            }
+            else if (Request.Body.CanSeek || Request.ContentLength.GetValueOrDefault() > 0)
+            {
+                Request.EnableBuffering();
+                using var reader = new StreamReader(Request.Body, Encoding.UTF8, leaveOpen: true);
+                var body = await reader.ReadToEndAsync();
+                Request.Body.Position = 0;
+
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(body);
+                        if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var property in doc.RootElement.EnumerateObject())
+                                values[property.Name] = property.Value.ValueKind == JsonValueKind.String
+                                    ? property.Value.GetString() ?? ""
+                                    : property.Value.ToString();
+                        }
+                    }
+                    catch
+                    {
+                        foreach (var pair in body.Split('&', StringSplitOptions.RemoveEmptyEntries))
+                        {
+                            var parts = pair.Split('=', 2);
+                            if (parts.Length == 2)
+                                values[Uri.UnescapeDataString(parts[0])] = Uri.UnescapeDataString(parts[1].Replace("+", " "));
+                        }
+                    }
+                }
+            }
+
+            return values;
+        }
+
+        protected static int GetIntValue(IReadOnlyDictionary<string, string> values, params string[] names)
+        {
+            foreach (var name in names)
+            {
+                if (values.TryGetValue(name, out var value) && int.TryParse(value, out var parsed))
+                    return parsed;
+            }
+
+            return 0;
+        }
+
         // Serialize with PascalCase preserved. Default System.Text.Json policy
         // is camelCase; the client expects PascalCase property names on most
         // domain objects (Avatar, Slideshow, room data, etc.).
