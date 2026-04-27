@@ -384,12 +384,19 @@ namespace RetroRec_Server.Controllers
         // copying the scene/template from the base room.
         [HttpPost("/rooms/{roomId:int}/clone")]
         [HttpPost("/api/rooms/{roomId:int}/clone")]
-        public IActionResult CloneRoom(int roomId, [FromForm] string name = null, [FromQuery] string nameQ = null)
+        [HttpPost("/rooms/v1/{roomId:int}/clone")]
+        [HttpPost("/api/rooms/v1/{roomId:int}/clone")]
+        [HttpPost("/rooms/clone/{roomId:int}")]
+        [HttpPost("/api/rooms/clone/{roomId:int}")]
+        public async Task<IActionResult> CloneRoom(int roomId, [FromForm] string name = null, [FromQuery] string nameQ = null)
         {
             int callerId = GetAccountIdFromAuth();
             if (callerId == 0) callerId = 2;
 
+            var values = await CollectRequestValuesAsync();
             var roomName = string.IsNullOrWhiteSpace(name) ? nameQ : name;
+            if (string.IsNullOrWhiteSpace(roomName))
+                roomName = GetStringValue(values, "name", "roomName", "RoomName", "cloneName");
 
             string templateName, sceneId, imageName;
 
@@ -436,7 +443,19 @@ namespace RetroRec_Server.Controllers
             db2.UserRooms.Add(newRoom);
             db2.SaveChanges();
 
-            return Pascal(ExpandUserRoom(newRoom));
+            var expanded = ExpandUserRoom(newRoom);
+            return Pascal(new
+            {
+                ErrorCode = 0,
+                Success = true,
+                success = true,
+                Room = expanded,
+                room = expanded,
+                RoomId = USER_ROOM_ID_BASE + newRoom.Id,
+                roomId = USER_ROOM_ID_BASE + newRoom.Id,
+                Name = newRoom.Name,
+                name = newRoom.Name
+            });
         }
 
         // Save room data (e.g. when user edits with maker pen). Stores the
@@ -447,10 +466,14 @@ namespace RetroRec_Server.Controllers
         [HttpPatch("/api/rooms/{roomId:int}")]
         [HttpPost("/rooms/{roomId:int}/save")]
         [HttpPost("/api/rooms/{roomId:int}/save")]
+        [HttpPost("/rooms/v1/{roomId:int}/save")]
+        [HttpPost("/api/rooms/v1/{roomId:int}/save")]
+        [HttpPost("/rooms/v2/{roomId:int}/save")]
+        [HttpPost("/api/rooms/v2/{roomId:int}/save")]
         public async Task<IActionResult> SaveRoom(int roomId)
         {
             if (roomId < USER_ROOM_ID_BASE)
-                return Ok(new { });
+                return Pascal(new { ErrorCode = 0, Saved = false, saved = false, RoomId = roomId, roomId = roomId });
 
             try
             {
@@ -461,14 +484,29 @@ namespace RetroRec_Server.Controllers
                 var room = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
                 if (room != null)
                 {
-                    room.DataBlob = body;
+                    if (string.IsNullOrWhiteSpace(body))
+                    {
+                        var values = await CollectRequestValuesAsync();
+                        body = GetStringValue(values, "dataBlob", "DataBlob", "data", "blob", "payload") ?? "";
+                    }
+
+                    room.DataBlob = body ?? "";
                     room.ModifiedAt = DateTime.UtcNow;
                     db.SaveChanges();
+                    return Pascal(new
+                    {
+                        ErrorCode = 0,
+                        Saved = true,
+                        saved = true,
+                        RoomId = roomId,
+                        roomId = roomId,
+                        ModifiedAt = room.ModifiedAt
+                    });
                 }
             }
             catch { }
 
-            return Ok(new { });
+            return Pascal(new { ErrorCode = 0, Saved = false, saved = false, RoomId = roomId, roomId = roomId });
         }
 
         // Mark a user room as published — flips IsPublished=true and changes

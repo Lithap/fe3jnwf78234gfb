@@ -1,6 +1,8 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 
 namespace RetroRec_Server.Controllers
 {
@@ -58,6 +60,109 @@ namespace RetroRec_Server.Controllers
                 PropertyNamingPolicy = null
             });
             return Content(json, "application/json");
+        }
+
+        // Collect common request values from route/query/form/json so endpoints
+        // can accept whichever payload shape the client sends on this build.
+        protected async Task<Dictionary<string, string>> CollectRequestValuesAsync()
+        {
+            var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                Request.EnableBuffering();
+            }
+            catch { }
+
+            foreach (var kv in Request.RouteValues)
+            {
+                if (kv.Value != null)
+                    values[kv.Key] = kv.Value.ToString() ?? "";
+            }
+
+            foreach (var kv in Request.Query)
+            {
+                if (!string.IsNullOrEmpty(kv.Value))
+                    values[kv.Key] = kv.Value.ToString();
+            }
+
+            if (Request.HasFormContentType)
+            {
+                try
+                {
+                    var form = await Request.ReadFormAsync();
+                    foreach (var kv in form)
+                    {
+                        if (!string.IsNullOrEmpty(kv.Value))
+                            values[kv.Key] = kv.Value.ToString();
+                    }
+                }
+                catch { }
+            }
+
+            try
+            {
+                if ((Request.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false) &&
+                    Request.Body.CanSeek)
+                {
+                    Request.Body.Position = 0;
+                    using var reader = new StreamReader(
+                        Request.Body,
+                        Encoding.UTF8,
+                        detectEncodingFromByteOrderMarks: false,
+                        bufferSize: 1024,
+                        leaveOpen: true);
+                    var body = await reader.ReadToEndAsync();
+                    Request.Body.Position = 0;
+
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        using var doc = JsonDocument.Parse(body);
+                        if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                        {
+                            foreach (var p in doc.RootElement.EnumerateObject())
+                            {
+                                string? value = p.Value.ValueKind switch
+                                {
+                                    JsonValueKind.String => p.Value.GetString(),
+                                    JsonValueKind.Number => p.Value.ToString(),
+                                    JsonValueKind.True => "true",
+                                    JsonValueKind.False => "false",
+                                    _ => p.Value.ToString()
+                                };
+
+                                if (!string.IsNullOrWhiteSpace(value))
+                                    values[p.Name] = value;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return values;
+        }
+
+        protected static int GetIntValue(IDictionary<string, string> values, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (values.TryGetValue(key, out var raw) &&
+                    int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) &&
+                    parsed != 0)
+                    return parsed;
+            }
+            return 0;
+        }
+
+        protected static string? GetStringValue(IDictionary<string, string> values, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (values.TryGetValue(key, out var raw) && !string.IsNullOrWhiteSpace(raw))
+                    return raw;
+            }
+            return null;
         }
     }
 

@@ -11,39 +11,77 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/api/invites/v1/")]
         [HttpGet("/invites/v1")]
         [HttpGet("/invites/v1/")]
+        [HttpGet("/api/invites/v2")]
+        [HttpGet("/api/invites/v2/")]
+        [HttpGet("/invites/v2")]
+        [HttpGet("/invites/v2/")]
         public IActionResult GetInvites()
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
+            var now = DateTime.UtcNow;
+
+            foreach (var kv in PartyState.Invites)
+            {
+                if (kv.Value.CreatedAt.AddMinutes(5) < now)
+                    PartyState.Invites.TryRemove(kv.Key, out _);
+            }
+
             var pending = PartyState.Invites.Values
                 .Where(i => i.TargetId == myId)
+                .OrderByDescending(i => i.CreatedAt)
                 .Select(i => new
                 {
+                    InviteId = i.InviteId,
                     inviteId = i.InviteId,
+                    SenderAccountId = i.SenderId,
                     senderAccountId = i.SenderId,
+                    RoomName = i.RoomName,
                     roomName = i.RoomName,
+                    RoomId = i.RoomId,
                     roomId = i.RoomId,
+                    IsPartyInvite = i.IsPartyInvite,
                     isPartyInvite = i.IsPartyInvite,
+                    CreatedAt = i.CreatedAt,
                     createdAt = i.CreatedAt,
+                    ExpiresAt = i.CreatedAt.AddMinutes(5),
                     expiresAt = i.CreatedAt.AddMinutes(5)
-                });
-            return Ok(pending);
+                })
+                .ToList();
+            return Pascal(pending);
         }
 
         [HttpPost("/api/invites/v1")]
         [HttpPost("/api/invites/v1/")]
         [HttpPost("/invites/v1")]
         [HttpPost("/invites/v1/")]
-        public IActionResult SendInvite([FromForm] Dictionary<string, string> form)
+        [HttpPost("/api/invites/v2")]
+        [HttpPost("/api/invites/v2/")]
+        [HttpPost("/invites/v2")]
+        [HttpPost("/invites/v2/")]
+        [HttpPost("/api/party/v1/invite")]
+        [HttpPost("/party/v1/invite")]
+        [HttpPost("/api/party/v2/invite")]
+        [HttpPost("/party/v2/invite")]
+        [HttpPost("/api/party/v1/invite/{targetId:int}")]
+        [HttpPost("/party/v1/invite/{targetId:int}")]
+        [HttpPost("/api/party/v2/invite/{targetId:int}")]
+        [HttpPost("/party/v2/invite/{targetId:int}")]
+        public async Task<IActionResult> SendInvite()
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
 
-            form.TryGetValue("targetAccountId", out var targetStr);
-            form.TryGetValue("roomName", out var roomName);
-            form.TryGetValue("roomId", out var roomIdStr);
-
-            if (!int.TryParse(targetStr, out var targetId)) return BadRequest();
+            var values = await CollectRequestValuesAsync();
+            int targetId = GetIntValue(values,
+                "targetAccountId",
+                "targetId",
+                "accountId",
+                "id",
+                "playerId",
+                "objectAccountId");
+            if (targetId == 0 || targetId == myId)
+                return Pascal(new { ErrorCode = 0 });
 
             UserRoomInstances.TryGetValue(myId, out var myRoomObj);
             var invRoomName = "DormRoom";
@@ -58,10 +96,12 @@ namespace RetroRec_Server.Controllers
                 }
                 catch { }
             }
+            var roomName = GetStringValue(values, "roomName", "room", "RoomName");
+            var parsedRoomId = GetIntValue(values, "roomId", "RoomId");
             if (!string.IsNullOrWhiteSpace(roomName)) invRoomName = roomName;
-            if (int.TryParse(roomIdStr, out var parsedRoomId) && parsedRoomId != 0) invRoomId = parsedRoomId;
+            if (parsedRoomId != 0) invRoomId = parsedRoomId;
 
-            var inviteId = $"inv_{myId}_{targetId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+            var inviteId = $"inv_{myId}_{targetId}_{Guid.NewGuid():N}";
             PartyState.Invites[inviteId] = new InviteData
             {
                 InviteId = inviteId,
@@ -73,35 +113,92 @@ namespace RetroRec_Server.Controllers
                 CreatedAt = DateTime.UtcNow
             };
 
-            return Ok(new { inviteId = inviteId });
+            return Pascal(new { ErrorCode = 0, InviteId = inviteId, inviteId = inviteId });
         }
 
         [HttpPost("/api/invites/v1/{inviteId}/accept")]
         [HttpPost("/invites/v1/{inviteId}/accept")]
-        public IActionResult AcceptInvite(string inviteId)
+        [HttpPost("/api/invites/v2/{inviteId}/accept")]
+        [HttpPost("/invites/v2/{inviteId}/accept")]
+        [HttpPost("/api/invites/v1/accept")]
+        [HttpPost("/invites/v1/accept")]
+        [HttpPost("/api/invites/v2/accept")]
+        [HttpPost("/invites/v2/accept")]
+        [HttpPost("/api/party/v1/acceptinvite")]
+        [HttpPost("/party/v1/acceptinvite")]
+        [HttpPost("/api/party/v2/acceptinvite")]
+        [HttpPost("/party/v2/acceptinvite")]
+        public async Task<IActionResult> AcceptInvite(string? inviteId = null)
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
 
-            if (!PartyState.Invites.TryRemove(inviteId, out var invite))
+            if (string.IsNullOrWhiteSpace(inviteId))
+            {
+                var values = await CollectRequestValuesAsync();
+                inviteId = GetStringValue(values, "inviteId", "InviteId", "id");
+            }
+            if (string.IsNullOrWhiteSpace(inviteId))
+                return Ok(new { });
+
+            if (!PartyState.Invites.TryGetValue(inviteId, out var invite))
+                return Ok(new { });
+
+            if (invite.TargetId != myId)
+                return Ok(new { });
+
+            if (!PartyState.Invites.TryRemove(inviteId, out invite))
                 return Ok(new { });
 
             if (invite.IsPartyInvite)
                 PartyState.MemberOf[myId] = invite.SenderId;
 
-            return Ok(new { roomName = invite.RoomName, roomId = invite.RoomId });
+            return Pascal(new
+            {
+                ErrorCode = 0,
+                RoomName = invite.RoomName,
+                roomName = invite.RoomName,
+                RoomId = invite.RoomId,
+                roomId = invite.RoomId,
+                IsPartyInvite = invite.IsPartyInvite,
+                isPartyInvite = invite.IsPartyInvite
+            });
         }
 
         [HttpDelete("/api/invites/v1/{inviteId}")]
         [HttpDelete("/invites/v1/{inviteId}")]
-        public IActionResult DeclineInvite(string inviteId)
+        [HttpDelete("/api/invites/v2/{inviteId}")]
+        [HttpDelete("/invites/v2/{inviteId}")]
+        [HttpPost("/api/invites/v1/{inviteId}/decline")]
+        [HttpPost("/invites/v1/{inviteId}/decline")]
+        [HttpPost("/api/invites/v2/{inviteId}/decline")]
+        [HttpPost("/invites/v2/{inviteId}/decline")]
+        [HttpPost("/api/invites/v1/decline")]
+        [HttpPost("/invites/v1/decline")]
+        [HttpPost("/api/invites/v2/decline")]
+        [HttpPost("/invites/v2/decline")]
+        [HttpPost("/api/party/v1/declineinvite")]
+        [HttpPost("/party/v1/declineinvite")]
+        [HttpPost("/api/party/v2/declineinvite")]
+        [HttpPost("/party/v2/declineinvite")]
+        public async Task<IActionResult> DeclineInvite(string? inviteId = null)
         {
+            if (string.IsNullOrWhiteSpace(inviteId))
+            {
+                var values = await CollectRequestValuesAsync();
+                inviteId = GetStringValue(values, "inviteId", "InviteId", "id");
+            }
+            if (string.IsNullOrWhiteSpace(inviteId))
+                return Ok(new { });
+
             PartyState.Invites.TryRemove(inviteId, out _);
             return Ok(new { });
         }
 
         [HttpPost("/api/party/v1/leave")]
         [HttpPost("/party/v1/leave")]
+        [HttpPost("/api/party/v2/leave")]
+        [HttpPost("/party/v2/leave")]
         public IActionResult LeaveParty()
         {
             int myId = GetAccountIdFromAuth();

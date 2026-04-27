@@ -315,6 +315,8 @@ namespace RetroRec_Server.Controllers
         //   type 4 = Both sent requests = mutual friends
         [HttpGet("/api/relationships/v2/get")]
         [HttpGet("/relationships/v2/get")]
+        [HttpGet("/api/relationships/v1/get")]
+        [HttpGet("/relationships/v1/get")]
         public IActionResult RelationshipsV2Get()
         {
             int myId = GetAccountIdFromAuth();
@@ -356,23 +358,52 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/relationships/v2/addfriend")]
         [HttpGet("/relationships/v2/addfriend")]
         [HttpPost("/relationships/v2/addfriend")]
+        [HttpGet("/api/relationships/v1/addfriend")]
+        [HttpPost("/api/relationships/v1/addfriend")]
+        [HttpGet("/relationships/v1/addfriend")]
+        [HttpPost("/relationships/v1/addfriend")]
         [HttpGet("/api/relationships/v2/sendfriendrequest")]
         [HttpPost("/api/relationships/v2/sendfriendrequest")]
         [HttpGet("/relationships/v2/sendfriendrequest")]
         [HttpPost("/relationships/v2/sendfriendrequest")]
-        public IActionResult AddFriend(
-            [FromQuery] int id = 0,
-            [FromQuery] int accountId = 0,
-            [FromQuery] int targetId = 0,
-            [FromQuery] int targetAccountId = 0)
+        [HttpGet("/api/relationships/v1/sendfriendrequest")]
+        [HttpPost("/api/relationships/v1/sendfriendrequest")]
+        [HttpGet("/relationships/v1/sendfriendrequest")]
+        [HttpPost("/relationships/v1/sendfriendrequest")]
+        [HttpGet("/api/relationships/v2/addfriend/{id:int}")]
+        [HttpPost("/api/relationships/v2/addfriend/{id:int}")]
+        [HttpGet("/relationships/v2/addfriend/{id:int}")]
+        [HttpPost("/relationships/v2/addfriend/{id:int}")]
+        [HttpGet("/api/relationships/v2/sendfriendrequest/{id:int}")]
+        [HttpPost("/api/relationships/v2/sendfriendrequest/{id:int}")]
+        [HttpGet("/relationships/v2/sendfriendrequest/{id:int}")]
+        [HttpPost("/relationships/v2/sendfriendrequest/{id:int}")]
+        [HttpGet("/api/relationships/v1/addfriend/{id:int}")]
+        [HttpPost("/api/relationships/v1/addfriend/{id:int}")]
+        [HttpGet("/relationships/v1/addfriend/{id:int}")]
+        [HttpPost("/relationships/v1/addfriend/{id:int}")]
+        [HttpGet("/api/relationships/v1/sendfriendrequest/{id:int}")]
+        [HttpPost("/api/relationships/v1/sendfriendrequest/{id:int}")]
+        [HttpGet("/relationships/v1/sendfriendrequest/{id:int}")]
+        [HttpPost("/relationships/v1/sendfriendrequest/{id:int}")]
+        public async Task<IActionResult> AddFriend()
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
-            int friendId = id != 0 ? id
-                         : accountId != 0 ? accountId
-                         : targetId != 0 ? targetId
-                         : targetAccountId;
-            if (friendId == 0) return Pascal(new { ErrorCode = 0 });
+
+            var values = await CollectRequestValuesAsync();
+            int friendId = GetIntValue(values,
+                "id",
+                "accountId",
+                "targetId",
+                "targetAccountId",
+                "friendId",
+                "friendAccountId",
+                "objectAccountId");
+
+            if (friendId == 0 || friendId == myId)
+                return Pascal(new { ErrorCode = 0 });
+
             PartyState.FriendRequests.TryAdd($"{myId}_{friendId}", true);
             bool mutual = PartyState.FriendRequests.ContainsKey($"{friendId}_{myId}");
             return Pascal(new { ErrorCode = 0, SubjectAccountId = myId, ObjectAccountId = friendId, Type = mutual ? 4 : 2 });
@@ -382,18 +413,49 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/relationships/v2/removefriend")]
         [HttpGet("/relationships/v2/removefriend")]
         [HttpPost("/relationships/v2/removefriend")]
-        public IActionResult RemoveFriend(
-            [FromQuery] int id = 0,
-            [FromQuery] int accountId = 0,
-            [FromQuery] int targetId = 0,
-            [FromQuery] int targetAccountId = 0)
+        [HttpGet("/api/relationships/v1/removefriend")]
+        [HttpPost("/api/relationships/v1/removefriend")]
+        [HttpGet("/relationships/v1/removefriend")]
+        [HttpPost("/relationships/v1/removefriend")]
+        [HttpGet("/api/relationships/v2/unfriend")]
+        [HttpPost("/api/relationships/v2/unfriend")]
+        [HttpGet("/relationships/v2/unfriend")]
+        [HttpPost("/relationships/v2/unfriend")]
+        [HttpGet("/api/relationships/v1/unfriend")]
+        [HttpPost("/api/relationships/v1/unfriend")]
+        [HttpGet("/relationships/v1/unfriend")]
+        [HttpPost("/relationships/v1/unfriend")]
+        [HttpGet("/api/relationships/v2/unfriend/{id:int}")]
+        [HttpPost("/api/relationships/v2/unfriend/{id:int}")]
+        [HttpGet("/relationships/v2/unfriend/{id:int}")]
+        [HttpPost("/relationships/v2/unfriend/{id:int}")]
+        [HttpGet("/api/relationships/v1/unfriend/{id:int}")]
+        [HttpPost("/api/relationships/v1/unfriend/{id:int}")]
+        [HttpGet("/relationships/v1/unfriend/{id:int}")]
+        [HttpPost("/relationships/v1/unfriend/{id:int}")]
+        [HttpGet("/api/relationships/v2/removefriend/{id:int}")]
+        [HttpPost("/api/relationships/v2/removefriend/{id:int}")]
+        [HttpGet("/relationships/v2/removefriend/{id:int}")]
+        [HttpPost("/relationships/v2/removefriend/{id:int}")]
+        [HttpGet("/api/relationships/v1/removefriend/{id:int}")]
+        [HttpPost("/api/relationships/v1/removefriend/{id:int}")]
+        [HttpGet("/relationships/v1/removefriend/{id:int}")]
+        [HttpPost("/relationships/v1/removefriend/{id:int}")]
+        public async Task<IActionResult> RemoveFriend()
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
-            int friendId = id != 0 ? id
-                         : accountId != 0 ? accountId
-                         : targetId != 0 ? targetId
-                         : targetAccountId;
+
+            var values = await CollectRequestValuesAsync();
+            int friendId = GetIntValue(values,
+                "id",
+                "accountId",
+                "targetId",
+                "targetAccountId",
+                "friendId",
+                "friendAccountId",
+                "objectAccountId");
+
             if (friendId == 0) return Ok(new { });
             PartyState.FriendRequests.TryRemove($"{myId}_{friendId}", out _);
             PartyState.FriendRequests.TryRemove($"{friendId}_{myId}", out _);
