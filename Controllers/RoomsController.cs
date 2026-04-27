@@ -384,12 +384,46 @@ namespace RetroRec_Server.Controllers
         // copying the scene/template from the base room.
         [HttpPost("/rooms/{roomId:int}/clone")]
         [HttpPost("/api/rooms/{roomId:int}/clone")]
-        public IActionResult CloneRoom(int roomId, [FromForm] string name = null, [FromQuery] string nameQ = null)
+        public async Task<IActionResult> CloneRoom(int roomId, [FromQuery] string nameQ = null)
         {
             int callerId = GetAccountIdFromAuth();
             if (callerId == 0) callerId = 2;
 
-            var roomName = string.IsNullOrWhiteSpace(name) ? nameQ : name;
+            string roomName = nameQ;
+
+            try
+            {
+                if (Request.HasFormContentType)
+                {
+                    var form = await Request.ReadFormAsync();
+                    if (form.TryGetValue("name", out var fn) && !string.IsNullOrWhiteSpace(fn))
+                        roomName = fn;
+                    if (string.IsNullOrWhiteSpace(roomName) && form.TryGetValue("roomName", out var frn) && !string.IsNullOrWhiteSpace(frn))
+                        roomName = frn;
+                }
+                else
+                {
+                    using var reader = new StreamReader(Request.Body);
+                    var body = await reader.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        try
+                        {
+                            var doc = JsonDocument.Parse(body);
+                            var root = doc.RootElement;
+                            if (root.TryGetProperty("name", out var nEl)) roomName = nEl.GetString();
+                            else if (root.TryGetProperty("Name", out var nEl2)) roomName = nEl2.GetString();
+                            else if (root.TryGetProperty("roomName", out var rnEl)) roomName = rnEl.GetString();
+                            else if (root.TryGetProperty("RoomName", out var rnEl2)) roomName = rnEl2.GetString();
+                        }
+                        catch (JsonException)
+                        {
+                            roomName = body.Trim();
+                        }
+                    }
+                }
+            }
+            catch { }
 
             string templateName, sceneId, imageName;
 
@@ -398,7 +432,7 @@ namespace RetroRec_Server.Controllers
                 using var db = new RetroRecDb();
                 var sourceRoom = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
                 if (sourceRoom == null)
-                    return BadRequest(new { error = "Base room not found" });
+                    return Pascal(new { ErrorCode = 1, Error = "Base room not found" });
                 templateName = sourceRoom.Name;
                 sceneId = sourceRoom.UnitySceneId;
                 imageName = sourceRoom.ImageName ?? "";
@@ -408,8 +442,6 @@ namespace RetroRec_Server.Controllers
                 var template = FindBaseRoom(roomId);
                 sceneId = RRConstants.GetSceneIdForRoom(roomId);
 
-                // Fall back to dorm scene as last resort so clone never hard-fails
-                // just because a room isn't in our flat files or RRConstants mapping.
                 if (string.IsNullOrEmpty(sceneId))
                     sceneId = RRConstants.DormSceneId;
 
@@ -436,7 +468,8 @@ namespace RetroRec_Server.Controllers
             db2.UserRooms.Add(newRoom);
             db2.SaveChanges();
 
-            return Pascal(ExpandUserRoom(newRoom));
+            var expanded = ExpandUserRoom(newRoom);
+            return Pascal(new { ErrorCode = 0, Room = expanded, Result = expanded });
         }
 
         // Save room data (e.g. when user edits with maker pen). Stores the
@@ -450,25 +483,62 @@ namespace RetroRec_Server.Controllers
         public async Task<IActionResult> SaveRoom(int roomId)
         {
             if (roomId < USER_ROOM_ID_BASE)
-                return Ok(new { });
+                return Pascal(ExpandRoom(FindBaseRoom(roomId) ?? new FlatRoom { RoomId = roomId, Name = "Room" }, "rro"));
 
-            try
+            using var reader = new StreamReader(Request.Body);
+            var body = await reader.ReadToEndAsync();
+
+            string dataBlob = body ?? "";
+            string name = null;
+            string description = null;
+            int? accessibility = null;
+            string imageName = null;
+
+            if (!string.IsNullOrWhiteSpace(body))
             {
-                using var reader = new StreamReader(Request.Body);
-                var body = await reader.ReadToEndAsync();
-
-                using var db = new RetroRecDb();
-                var room = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
-                if (room != null)
+                try
                 {
-                    room.DataBlob = body;
-                    room.ModifiedAt = DateTime.UtcNow;
-                    db.SaveChanges();
+                    var doc = JsonDocument.Parse(body);
+                    var root = doc.RootElement;
+                    if (root.TryGetProperty("DataBlob", out var dbEl))
+                        dataBlob = dbEl.GetString() ?? "";
+                    else if (root.TryGetProperty("dataBlob", out var dbEl2))
+                        dataBlob = dbEl2.GetString() ?? "";
+                    else
+                        dataBlob = body;
+
+                    if (root.TryGetProperty("Name", out var nEl)) name = nEl.GetString();
+                    else if (root.TryGetProperty("name", out var nEl2)) name = nEl2.GetString();
+
+                    if (root.TryGetProperty("Description", out var dEl)) description = dEl.GetString();
+                    else if (root.TryGetProperty("description", out var dEl2)) description = dEl2.GetString();
+
+                    if (root.TryGetProperty("Accessibility", out var aEl) && aEl.TryGetInt32(out var av)) accessibility = av;
+                    else if (root.TryGetProperty("accessibility", out var aEl2) && aEl2.TryGetInt32(out var av2)) accessibility = av2;
+
+                    if (root.TryGetProperty("ImageName", out var iEl)) imageName = iEl.GetString();
+                    else if (root.TryGetProperty("imageName", out var iEl2)) imageName = iEl2.GetString();
+                }
+                catch (JsonException)
+                {
+                    dataBlob = body;
                 }
             }
-            catch { }
 
-            return Ok(new { });
+            using var db = new RetroRecDb();
+            var room = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
+            if (room == null)
+                return NotFound(new { error = "Room not found" });
+
+            room.DataBlob = dataBlob;
+            room.ModifiedAt = DateTime.UtcNow;
+            if (name != null) room.Name = name;
+            if (description != null) room.Description = description;
+            if (accessibility.HasValue) room.Accessibility = accessibility.Value;
+            if (imageName != null) room.ImageName = imageName;
+            db.SaveChanges();
+
+            return Pascal(ExpandUserRoom(room));
         }
 
         // Mark a user room as published — flips IsPublished=true and changes

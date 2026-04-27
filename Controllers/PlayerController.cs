@@ -320,6 +320,7 @@ namespace RetroRec_Server.Controllers
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
 
+            var seen = new HashSet<int>();
             var results = new List<object>();
             foreach (var key in PartyState.FriendRequests.Keys)
             {
@@ -330,12 +331,15 @@ namespace RetroRec_Server.Controllers
 
                 bool iSent = sender == myId;
                 int otherId = iSent ? target : sender;
-                bool theyAlsoSent = PartyState.FriendRequests.ContainsKey($"{otherId}_{myId}");
 
-                if (!iSent && theyAlsoSent) continue;
+                if (!seen.Add(otherId)) continue;
+
+                bool reverseExists = PartyState.FriendRequests.ContainsKey($"{target}_{sender}");
 
                 int relType;
-                if (theyAlsoSent)
+                if (iSent && reverseExists)
+                    relType = 4;
+                else if (!iSent && reverseExists)
                     relType = 4;
                 else if (iSent)
                     relType = 2;
@@ -344,8 +348,8 @@ namespace RetroRec_Server.Controllers
 
                 results.Add(new
                 {
-                    SubjectAccountId = iSent ? myId : otherId,
-                    ObjectAccountId = iSent ? otherId : myId,
+                    SubjectAccountId = myId,
+                    ObjectAccountId = otherId,
                     Type = relType
                 });
             }
@@ -360,7 +364,7 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/relationships/v2/sendfriendrequest")]
         [HttpGet("/relationships/v2/sendfriendrequest")]
         [HttpPost("/relationships/v2/sendfriendrequest")]
-        public IActionResult AddFriend(
+        public async Task<IActionResult> AddFriend(
             [FromQuery] int id = 0,
             [FromQuery] int accountId = 0,
             [FromQuery] int targetId = 0,
@@ -372,6 +376,8 @@ namespace RetroRec_Server.Controllers
                          : accountId != 0 ? accountId
                          : targetId != 0 ? targetId
                          : targetAccountId;
+            if (friendId == 0)
+                friendId = await ReadTargetIdFromBodyAsync();
             if (friendId == 0) return Pascal(new { ErrorCode = 0 });
             PartyState.FriendRequests.TryAdd($"{myId}_{friendId}", true);
             bool mutual = PartyState.FriendRequests.ContainsKey($"{friendId}_{myId}");
@@ -382,7 +388,7 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/relationships/v2/removefriend")]
         [HttpGet("/relationships/v2/removefriend")]
         [HttpPost("/relationships/v2/removefriend")]
-        public IActionResult RemoveFriend(
+        public async Task<IActionResult> RemoveFriend(
             [FromQuery] int id = 0,
             [FromQuery] int accountId = 0,
             [FromQuery] int targetId = 0,
@@ -394,6 +400,8 @@ namespace RetroRec_Server.Controllers
                          : accountId != 0 ? accountId
                          : targetId != 0 ? targetId
                          : targetAccountId;
+            if (friendId == 0)
+                friendId = await ReadTargetIdFromBodyAsync();
             if (friendId == 0) return Ok(new { });
             PartyState.FriendRequests.TryRemove($"{myId}_{friendId}", out _);
             PartyState.FriendRequests.TryRemove($"{friendId}_{myId}", out _);

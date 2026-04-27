@@ -48,6 +48,45 @@ namespace RetroRec_Server.Controllers
             return 0;
         }
 
+        // Reads a target account ID from the request body, trying JSON
+        // properties (targetAccountId, accountId, targetId, id) and then
+        // form-encoded fields with the same names. Returns 0 if nothing found.
+        protected async Task<int> ReadTargetIdFromBodyAsync()
+        {
+            try
+            {
+                Request.Body.Position = 0;
+            }
+            catch { }
+            try
+            {
+                if (Request.HasFormContentType)
+                {
+                    var form = await Request.ReadFormAsync();
+                    foreach (var key in new[] { "targetAccountId", "accountId", "targetId", "id" })
+                    {
+                        if (form.TryGetValue(key, out var val) && int.TryParse(val, out var fid) && fid != 0)
+                            return fid;
+                    }
+                    return 0;
+                }
+                using var reader = new System.IO.StreamReader(Request.Body, leaveOpen: true);
+                var body = await reader.ReadToEndAsync();
+                if (string.IsNullOrWhiteSpace(body)) return 0;
+                var doc = JsonDocument.Parse(body);
+                foreach (var key in new[] { "targetAccountId", "accountId", "targetId", "id" })
+                {
+                    if (doc.RootElement.TryGetProperty(key, out var el))
+                    {
+                        if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var n) && n != 0) return n;
+                        if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out var s) && s != 0) return s;
+                    }
+                }
+            }
+            catch { }
+            return 0;
+        }
+
         // Serialize with PascalCase preserved. Default System.Text.Json policy
         // is camelCase; the client expects PascalCase property names on most
         // domain objects (Avatar, Slideshow, room data, etc.).

@@ -15,35 +15,87 @@ namespace RetroRec_Server.Controllers
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
-            var pending = PartyState.Invites.Values
-                .Where(i => i.TargetId == myId)
-                .Select(i => new
+
+            var expired = new List<string>();
+            var now = DateTime.UtcNow;
+            var pending = new List<object>();
+
+            foreach (var i in PartyState.Invites.Values)
+            {
+                if (i.TargetId != myId) continue;
+                if (i.InviteId != null && i.InviteId.StartsWith("party_")) continue;
+
+                if (now > i.CreatedAt.AddMinutes(5))
                 {
-                    inviteId = i.InviteId,
-                    senderAccountId = i.SenderId,
-                    roomName = i.RoomName,
-                    roomId = i.RoomId,
-                    isPartyInvite = i.IsPartyInvite,
-                    createdAt = i.CreatedAt,
-                    expiresAt = i.CreatedAt.AddMinutes(5)
+                    if (i.InviteId != null) expired.Add(i.InviteId);
+                    continue;
+                }
+
+                pending.Add(new
+                {
+                    InviteId = i.InviteId,
+                    SenderAccountId = i.SenderId,
+                    RoomName = i.RoomName,
+                    RoomId = i.RoomId,
+                    IsPartyInvite = i.IsPartyInvite,
+                    CreatedAt = i.CreatedAt,
+                    ExpiresAt = i.CreatedAt.AddMinutes(5)
                 });
-            return Ok(pending);
+            }
+
+            foreach (var id in expired)
+                PartyState.Invites.TryRemove(id, out _);
+
+            return Pascal(pending);
         }
 
         [HttpPost("/api/invites/v1")]
         [HttpPost("/api/invites/v1/")]
         [HttpPost("/invites/v1")]
         [HttpPost("/invites/v1/")]
-        public IActionResult SendInvite([FromForm] Dictionary<string, string> form)
+        public async Task<IActionResult> SendInvite()
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
 
-            form.TryGetValue("targetAccountId", out var targetStr);
-            form.TryGetValue("roomName", out var roomName);
-            form.TryGetValue("roomId", out var roomIdStr);
+            string targetStr = null, roomName = null, roomIdStr = null;
 
-            if (!int.TryParse(targetStr, out var targetId)) return BadRequest();
+            if (Request.HasFormContentType)
+            {
+                var form = await Request.ReadFormAsync();
+                form.TryGetValue("targetAccountId", out var t); targetStr = t;
+                form.TryGetValue("roomName", out var r); roomName = r;
+                form.TryGetValue("roomId", out var ri); roomIdStr = ri;
+            }
+            else
+            {
+                try
+                {
+                    using var reader = new System.IO.StreamReader(Request.Body);
+                    var body = await reader.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        var doc = System.Text.Json.JsonDocument.Parse(body);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("targetAccountId", out var tEl))
+                            targetStr = tEl.ValueKind == System.Text.Json.JsonValueKind.Number ? tEl.GetRawText() : tEl.GetString();
+                        if (root.TryGetProperty("roomName", out var rEl))
+                            roomName = rEl.GetString();
+                        if (root.TryGetProperty("roomId", out var riEl))
+                            roomIdStr = riEl.ValueKind == System.Text.Json.JsonValueKind.Number ? riEl.GetRawText() : riEl.GetString();
+                    }
+                }
+                catch { }
+            }
+
+            if (!int.TryParse(targetStr, out var targetId) || targetId == 0)
+            {
+                int qTarget = 0;
+                if (Request.Query.TryGetValue("targetAccountId", out var qv))
+                    int.TryParse(qv, out qTarget);
+                if (qTarget == 0) return BadRequest();
+                targetId = qTarget;
+            }
 
             UserRoomInstances.TryGetValue(myId, out var myRoomObj);
             var invRoomName = "DormRoom";
@@ -73,7 +125,7 @@ namespace RetroRec_Server.Controllers
                 CreatedAt = DateTime.UtcNow
             };
 
-            return Ok(new { inviteId = inviteId });
+            return Pascal(new { InviteId = inviteId });
         }
 
         [HttpPost("/api/invites/v1/{inviteId}/accept")]
@@ -84,12 +136,19 @@ namespace RetroRec_Server.Controllers
             if (myId == 0) myId = 2;
 
             if (!PartyState.Invites.TryRemove(inviteId, out var invite))
-                return Ok(new { });
+                return Pascal(new { ErrorCode = 0 });
 
             if (invite.IsPartyInvite)
                 PartyState.MemberOf[myId] = invite.SenderId;
 
-            return Ok(new { roomName = invite.RoomName, roomId = invite.RoomId });
+            return Pascal(new
+            {
+                ErrorCode = 0,
+                RoomName = invite.RoomName,
+                RoomId = invite.RoomId,
+                InviteId = inviteId,
+                SenderAccountId = invite.SenderId
+            });
         }
 
         [HttpDelete("/api/invites/v1/{inviteId}")]
@@ -97,7 +156,7 @@ namespace RetroRec_Server.Controllers
         public IActionResult DeclineInvite(string inviteId)
         {
             PartyState.Invites.TryRemove(inviteId, out _);
-            return Ok(new { });
+            return Pascal(new { ErrorCode = 0 });
         }
 
         [HttpPost("/api/party/v1/leave")]
