@@ -384,12 +384,47 @@ namespace RetroRec_Server.Controllers
         // copying the scene/template from the base room.
         [HttpPost("/rooms/{roomId:int}/clone")]
         [HttpPost("/api/rooms/{roomId:int}/clone")]
-        public IActionResult CloneRoom(int roomId, [FromForm] string name = null, [FromQuery] string nameQ = null)
+        public async Task<IActionResult> CloneRoom(int roomId, [FromForm] string name = null, [FromQuery] string nameQ = null)
         {
             int callerId = GetAccountIdFromAuth();
             if (callerId == 0) callerId = 2;
 
-            var roomName = string.IsNullOrWhiteSpace(name) ? nameQ : name;
+            var roomName = !string.IsNullOrWhiteSpace(name) ? name : nameQ;
+
+            // The Watch UI sometimes posts the new room name as a JSON body
+            // (e.g. {"name":"Testing"}) instead of form-encoded. Without this
+            // the previous [FromForm] binding gave roomName = null and the
+            // newly-cloned room ended up with the auto-generated default name
+            // "<Template> Clone" — which the client interpreted as "the create
+            // dialog didn't actually save my chosen name → clone failed",
+            // even though a room WAS created in the DB. Hence the bug
+            // "creating rooms it says clone failed but creates it".
+            if (string.IsNullOrWhiteSpace(roomName) && Request.ContentLength.GetValueOrDefault() > 0)
+            {
+                try
+                {
+                    Request.EnableBuffering();
+                    Request.Body.Position = 0;
+                    using var reader = new StreamReader(Request.Body, leaveOpen: true);
+                    var body = await reader.ReadToEndAsync();
+                    Request.Body.Position = 0;
+                    if (!string.IsNullOrWhiteSpace(body) &&
+                        (Request.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false))
+                    {
+                        using var doc = JsonDocument.Parse(body);
+                        foreach (var key in new[] { "name", "Name", "roomName", "RoomName" })
+                        {
+                            if (doc.RootElement.TryGetProperty(key, out var el) &&
+                                el.ValueKind == JsonValueKind.String)
+                            {
+                                roomName = el.GetString();
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
 
             string templateName, sceneId, imageName;
 
@@ -398,10 +433,20 @@ namespace RetroRec_Server.Controllers
                 using var db = new RetroRecDb();
                 var sourceRoom = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
                 if (sourceRoom == null)
-                    return BadRequest(new { error = "Base room not found" });
-                templateName = sourceRoom.Name;
-                sceneId = sourceRoom.UnitySceneId;
-                imageName = sourceRoom.ImageName ?? "";
+                {
+                    // Fall back instead of BadRequest so the client doesn't
+                    // surface a hard "clone failed" error. Treat unknown user
+                    // room ids as a generic blank-template clone.
+                    templateName = $"Room{roomId}";
+                    sceneId = RRConstants.DormSceneId;
+                    imageName = "";
+                }
+                else
+                {
+                    templateName = sourceRoom.Name;
+                    sceneId = sourceRoom.UnitySceneId;
+                    imageName = sourceRoom.ImageName ?? "";
+                }
             }
             else
             {
@@ -417,58 +462,160 @@ namespace RetroRec_Server.Controllers
                 imageName = template?.ImageName ?? "";
             }
 
-            var newRoom = new UserRoom
+            UserRoom newRoom;
+            try
             {
-                Name = string.IsNullOrWhiteSpace(roomName) ? $"{templateName} Clone" : roomName,
-                Description = $"Cloned from {templateName}",
-                CreatorAccountId = callerId,
-                BaseRoomId = roomId,
-                UnitySceneId = sceneId,
-                ImageName = imageName,
-                Accessibility = 2,
-                IsPublished = false,
-                DataBlob = "",
-                CreatedAt = DateTime.UtcNow,
-                ModifiedAt = DateTime.UtcNow
-            };
+                newRoom = new UserRoom
+                {
+                    Name = string.IsNullOrWhiteSpace(roomName) ? $"{templateName} Clone" : roomName,
+                    Description = $"Cloned from {templateName}",
+                    CreatorAccountId = callerId,
+                    BaseRoomId = roomId,
+                    UnitySceneId = sceneId,
+                    ImageName = imageName,
+                    Accessibility = 2,
+                    IsPublished = false,
+                    DataBlob = "",
+                    CreatedAt = DateTime.UtcNow,
+                    ModifiedAt = DateTime.UtcNow
+                };
 
-            using var db2 = new RetroRecDb();
-            db2.UserRooms.Add(newRoom);
-            db2.SaveChanges();
+                using var db2 = new RetroRecDb();
+                db2.UserRooms.Add(newRoom);
+                db2.SaveChanges();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[clone] DB write failed: {ex}");
+                return StatusCode(500, new { ErrorCode = 1, Error = "clone_failed" });
+            }
 
-            return Pascal(ExpandUserRoom(newRoom));
+            // Wrap the room in the same envelope shape the client expects from
+            // every other "I just performed a mutating action" endpoint:
+            //   { ErrorCode: 0, Room: <expanded room>, RoomId: <id> }
+            // Returning the bare ExpandUserRoom payload made the client treat
+            // the response as malformed and surface "clone failed" even though
+            // the row was created successfully.
+            var expanded = ExpandUserRoom(newRoom);
+            var newRoomId = USER_ROOM_ID_BASE + newRoom.Id;
+            return Pascal(new
+            {
+                ErrorCode = 0,
+                RoomId = newRoomId,
+                Room = expanded,
+                Name = newRoom.Name,
+                CreatorAccountId = newRoom.CreatorAccountId
+            });
         }
 
         // Save room data (e.g. when user edits with maker pen). Stores the
         // serialized scene blob into the UserRoom row.
+        // The Rec Room client uses several different routes for "save my
+        // edits", depending on which menu issued the save (Watch's room
+        // menu vs. CV2 maker pen vs. legacy 'edit room' flow). We accept
+        // every variation so saves don't fall through to the image catchall
+        // (which silently returned a 1x1 PNG and left the client with
+        // "save failed").
         [HttpPut("/rooms/{roomId:int}")]
         [HttpPut("/api/rooms/{roomId:int}")]
         [HttpPatch("/rooms/{roomId:int}")]
         [HttpPatch("/api/rooms/{roomId:int}")]
         [HttpPost("/rooms/{roomId:int}/save")]
         [HttpPost("/api/rooms/{roomId:int}/save")]
-        public async Task<IActionResult> SaveRoom(int roomId)
+        [HttpPost("/rooms/{roomId:int}/savesubroom")]
+        [HttpPost("/api/rooms/{roomId:int}/savesubroom")]
+        [HttpPost("/api/rooms/v3/{roomId:int}/save")]
+        [HttpPost("/api/rooms/v3/{roomId:int}/savesubroom")]
+        [HttpPost("/rooms/{roomId:int}/{subRoomId:int}/save")]
+        [HttpPost("/api/rooms/{roomId:int}/{subRoomId:int}/save")]
+        [HttpPut("/rooms/{roomId:int}/subroom/{subRoomId:int}")]
+        [HttpPut("/api/rooms/{roomId:int}/subroom/{subRoomId:int}")]
+        public async Task<IActionResult> SaveRoom(int roomId, int subRoomId = 0)
         {
-            if (roomId < USER_ROOM_ID_BASE)
-                return Ok(new { });
-
+            // Always read the body first so the client's payload doesn't
+            // dangle and trigger a connection-reset retry loop.
+            string body;
             try
             {
                 using var reader = new StreamReader(Request.Body);
-                var body = await reader.ReadToEndAsync();
+                body = await reader.ReadToEndAsync();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[save] body read failed for room {roomId}: {ex.Message}");
+                return StatusCode(500, new { ErrorCode = 1, Error = "body_read_failed" });
+            }
 
+            // Some payloads are JSON envelopes like {"DataBlob":"..."} rather
+            // than a raw scene string. Unwrap when we can recognize that.
+            string dataToSave = body;
+            if (!string.IsNullOrEmpty(body) && (body.TrimStart().StartsWith("{") || body.TrimStart().StartsWith("[")))
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(body);
+                    if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var key in new[] { "DataBlob", "dataBlob", "data", "Data" })
+                        {
+                            if (doc.RootElement.TryGetProperty(key, out var el) &&
+                                el.ValueKind == JsonValueKind.String)
+                            {
+                                dataToSave = el.GetString() ?? body;
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // Base/community rooms aren't backed by a UserRoom row, but the
+            // client still calls save when you edit them (it just won't show
+            // up to other players). Acknowledge with success so the editor
+            // closes cleanly instead of yelling "save failed".
+            if (roomId < USER_ROOM_ID_BASE)
+            {
+                return Pascal(new
+                {
+                    ErrorCode = 0,
+                    RoomId = roomId,
+                    SubRoomId = subRoomId == 0 ? roomId : subRoomId,
+                    SavedAt = DateTime.UtcNow.ToString("O")
+                });
+            }
+
+            try
+            {
                 using var db = new RetroRecDb();
                 var room = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
-                if (room != null)
+                if (room == null)
                 {
-                    room.DataBlob = body;
-                    room.ModifiedAt = DateTime.UtcNow;
-                    db.SaveChanges();
+                    Console.WriteLine($"[save] room {roomId} not found in DB");
+                    return NotFound(new { ErrorCode = 1, Error = "room_not_found" });
                 }
-            }
-            catch { }
 
-            return Ok(new { });
+                room.DataBlob = dataToSave ?? "";
+                room.ModifiedAt = DateTime.UtcNow;
+                db.SaveChanges();
+
+                // Return the freshly-saved room in the same envelope as clone.
+                // Some clients re-render their room panel from this response;
+                // returning Ok({}) made them think the save was lost.
+                return Pascal(new
+                {
+                    ErrorCode = 0,
+                    RoomId = roomId,
+                    SubRoomId = subRoomId == 0 ? roomId : subRoomId,
+                    Room = ExpandUserRoom(room),
+                    SavedAt = room.ModifiedAt.ToString("O")
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[save] DB write failed for room {roomId}: {ex}");
+                return StatusCode(500, new { ErrorCode = 1, Error = "save_failed" });
+            }
         }
 
         // Mark a user room as published — flips IsPublished=true and changes
@@ -721,19 +868,13 @@ namespace RetroRec_Server.Controllers
             {
                 // Immediately update the member's room so their next heartbeat
                 // returns the leader's room instance and the client auto-follows.
+                // Important: we do NOT also synthesize an invite here — members
+                // are already in the leader's party, so re-issuing an invite
+                // every time the leader teleports causes the "X wants to go
+                // with you" notification to fire on every room change.
+                // Updating their RoomInstance is enough; the heartbeat-driven
+                // auto-follow path handles the rest.
                 UserRoomInstances[kvp.Key] = roomInstance;
-
-                var followKey = $"party_{playerId}_{kvp.Key}";
-                PartyState.Invites[followKey] = new InviteData
-                {
-                    InviteId = followKey,
-                    SenderId = playerId,
-                    TargetId = kvp.Key,
-                    RoomName = roomName,
-                    RoomId = roomId,
-                    IsPartyInvite = true,
-                    CreatedAt = DateTime.UtcNow
-                };
             }
 
             return Pascal(new
