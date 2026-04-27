@@ -34,16 +34,74 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/invites/v1/")]
         [HttpPost("/invites/v1")]
         [HttpPost("/invites/v1/")]
-        public IActionResult SendInvite([FromForm] Dictionary<string, string> form)
+        public async Task<IActionResult> SendInvite()
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
 
-            form.TryGetValue("targetAccountId", out var targetStr);
-            form.TryGetValue("roomName", out var roomName);
-            form.TryGetValue("roomId", out var roomIdStr);
+            string targetStr = null, roomName = null, roomIdStr = null;
 
-            if (!int.TryParse(targetStr, out var targetId)) return BadRequest();
+            // Read from form body.
+            if (Request.HasFormContentType)
+            {
+                if (Request.Form.TryGetValue("targetAccountId", out var fTarget)) targetStr = fTarget;
+                if (Request.Form.TryGetValue("roomName", out var fRoom)) roomName = fRoom;
+                if (Request.Form.TryGetValue("roomId", out var fRoomId)) roomIdStr = fRoomId;
+            }
+
+            // Fall back to JSON body when form params are absent.
+            if (string.IsNullOrWhiteSpace(targetStr))
+            {
+                try
+                {
+                    using var reader = new System.IO.StreamReader(Request.Body);
+                    var body = await reader.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        var doc = System.Text.Json.JsonDocument.Parse(body);
+                        var root = doc.RootElement;
+                        foreach (var propName in new[] { "targetAccountId", "TargetAccountId", "targetId", "TargetId" })
+                        {
+                            if (root.TryGetProperty(propName, out var el))
+                            {
+                                if (el.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                    targetStr = el.GetInt32().ToString();
+                                else
+                                    targetStr = el.GetString();
+                                if (!string.IsNullOrWhiteSpace(targetStr)) break;
+                            }
+                        }
+                        if (string.IsNullOrWhiteSpace(roomName))
+                        {
+                            foreach (var propName in new[] { "roomName", "RoomName" })
+                            {
+                                if (root.TryGetProperty(propName, out var el)) { roomName = el.GetString(); break; }
+                            }
+                        }
+                        if (string.IsNullOrWhiteSpace(roomIdStr))
+                        {
+                            foreach (var propName in new[] { "roomId", "RoomId" })
+                            {
+                                if (root.TryGetProperty(propName, out var el))
+                                {
+                                    roomIdStr = el.ValueKind == System.Text.Json.JsonValueKind.Number
+                                        ? el.GetInt32().ToString() : el.GetString();
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // Also accept query params as last resort.
+            if (string.IsNullOrWhiteSpace(targetStr) && Request.Query.TryGetValue("targetAccountId", out var qTarget))
+                targetStr = qTarget;
+            if (string.IsNullOrWhiteSpace(roomIdStr) && Request.Query.TryGetValue("roomId", out var qRoomId))
+                roomIdStr = qRoomId;
+
+            if (!int.TryParse(targetStr, out var targetId) || targetId == 0) return BadRequest(new { error = "targetAccountId required" });
 
             UserRoomInstances.TryGetValue(myId, out var myRoomObj);
             var invRoomName = "DormRoom";

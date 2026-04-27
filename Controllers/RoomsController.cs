@@ -379,68 +379,110 @@ namespace RetroRec_Server.Controllers
         // ============ CREATE ROOM (clone from base) ============
 
         // Watch's Create menu calls this when you pick a base room and
-        // give it a name. Body is form-encoded: name=Testing.
+        // give it a name. Body may be form-encoded (name=Testing) or JSON
+        // ({"name":"Testing"}). Name can also be supplied as a query param.
         // We create a new UserRoom row in the DB owned by the calling user,
         // copying the scene/template from the base room.
         [HttpPost("/rooms/{roomId:int}/clone")]
         [HttpPost("/api/rooms/{roomId:int}/clone")]
-        public IActionResult CloneRoom(int roomId, [FromForm] string name = null, [FromQuery] string nameQ = null)
+        public async Task<IActionResult> CloneRoom(int roomId)
         {
             int callerId = GetAccountIdFromAuth();
             if (callerId == 0) callerId = 2;
 
-            var roomName = string.IsNullOrWhiteSpace(name) ? nameQ : name;
+            // Resolve room name: query param → form field → JSON body → null.
+            string roomName = null;
+
+            if (Request.Query.TryGetValue("name", out var qName) && !string.IsNullOrWhiteSpace(qName))
+                roomName = qName.ToString();
+
+            if (string.IsNullOrWhiteSpace(roomName) && Request.HasFormContentType)
+            {
+                if (Request.Form.TryGetValue("name", out var fName) && !string.IsNullOrWhiteSpace(fName))
+                    roomName = fName.ToString();
+            }
+
+            if (string.IsNullOrWhiteSpace(roomName))
+            {
+                try
+                {
+                    using var reader = new StreamReader(Request.Body);
+                    var body = await reader.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        var doc = System.Text.Json.JsonDocument.Parse(body);
+                        var root = doc.RootElement;
+                        foreach (var propName in new[] { "name", "Name", "roomName", "RoomName" })
+                        {
+                            if (root.TryGetProperty(propName, out var el))
+                            {
+                                var v = el.GetString();
+                                if (!string.IsNullOrWhiteSpace(v)) { roomName = v; break; }
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
 
             string templateName, sceneId, imageName;
 
-            if (roomId >= USER_ROOM_ID_BASE)
+            try
             {
-                using var db = new RetroRecDb();
-                var sourceRoom = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
-                if (sourceRoom == null)
-                    return BadRequest(new { error = "Base room not found" });
-                templateName = sourceRoom.Name;
-                sceneId = sourceRoom.UnitySceneId;
-                imageName = sourceRoom.ImageName ?? "";
+                if (roomId >= USER_ROOM_ID_BASE)
+                {
+                    using var db = new RetroRecDb();
+                    var sourceRoom = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
+                    if (sourceRoom == null)
+                        return BadRequest(new { error = "Base room not found" });
+                    templateName = sourceRoom.Name;
+                    sceneId = sourceRoom.UnitySceneId;
+                    imageName = sourceRoom.ImageName ?? "";
+                }
+                else
+                {
+                    var template = FindBaseRoom(roomId);
+                    sceneId = RRConstants.GetSceneIdForRoom(roomId);
+
+                    // Fall back to dorm scene as last resort so clone never hard-fails
+                    // just because a room isn't in our flat files or RRConstants mapping.
+                    if (string.IsNullOrEmpty(sceneId))
+                        sceneId = RRConstants.DormSceneId;
+
+                    templateName = template?.Name ?? $"Room{roomId}";
+                    imageName = template?.ImageName ?? "";
+                }
+
+                var newRoom = new UserRoom
+                {
+                    Name = string.IsNullOrWhiteSpace(roomName) ? $"{templateName} Clone" : roomName,
+                    Description = $"Cloned from {templateName}",
+                    CreatorAccountId = callerId,
+                    BaseRoomId = roomId,
+                    UnitySceneId = sceneId,
+                    ImageName = imageName,
+                    Accessibility = 2,
+                    IsPublished = false,
+                    DataBlob = "",
+                    CreatedAt = DateTime.UtcNow,
+                    ModifiedAt = DateTime.UtcNow
+                };
+
+                using var db2 = new RetroRecDb();
+                db2.UserRooms.Add(newRoom);
+                db2.SaveChanges();
+
+                return Pascal(ExpandUserRoom(newRoom));
             }
-            else
+            catch (Exception ex)
             {
-                var template = FindBaseRoom(roomId);
-                sceneId = RRConstants.GetSceneIdForRoom(roomId);
-
-                // Fall back to dorm scene as last resort so clone never hard-fails
-                // just because a room isn't in our flat files or RRConstants mapping.
-                if (string.IsNullOrEmpty(sceneId))
-                    sceneId = RRConstants.DormSceneId;
-
-                templateName = template?.Name ?? $"Room{roomId}";
-                imageName = template?.ImageName ?? "";
+                return StatusCode(500, new { error = "Clone failed", detail = ex.Message });
             }
-
-            var newRoom = new UserRoom
-            {
-                Name = string.IsNullOrWhiteSpace(roomName) ? $"{templateName} Clone" : roomName,
-                Description = $"Cloned from {templateName}",
-                CreatorAccountId = callerId,
-                BaseRoomId = roomId,
-                UnitySceneId = sceneId,
-                ImageName = imageName,
-                Accessibility = 2,
-                IsPublished = false,
-                DataBlob = "",
-                CreatedAt = DateTime.UtcNow,
-                ModifiedAt = DateTime.UtcNow
-            };
-
-            using var db2 = new RetroRecDb();
-            db2.UserRooms.Add(newRoom);
-            db2.SaveChanges();
-
-            return Pascal(ExpandUserRoom(newRoom));
         }
 
         // Save room data (e.g. when user edits with maker pen). Stores the
-        // serialized scene blob into the UserRoom row.
+        // serialized scene blob into the UserRoom row and returns the updated
+        // room object so the client confirms success.
         [HttpPut("/rooms/{roomId:int}")]
         [HttpPut("/api/rooms/{roomId:int}")]
         [HttpPatch("/rooms/{roomId:int}")]
@@ -452,23 +494,44 @@ namespace RetroRec_Server.Controllers
             if (roomId < USER_ROOM_ID_BASE)
                 return Ok(new { });
 
-            try
+            using var reader = new StreamReader(Request.Body);
+            var body = await reader.ReadToEndAsync();
+
+            // The client may send either a raw DataBlob string, a JSON object
+            // with a "dataBlob" or "DataBlob" field, or a JSON object that
+            // contains room metadata alongside the blob. Try to extract just the
+            // blob string; fall back to using the entire body as-is.
+            var dataBlob = body;
+            if (!string.IsNullOrWhiteSpace(body) && body.TrimStart().StartsWith("{"))
             {
-                using var reader = new StreamReader(Request.Body);
-                var body = await reader.ReadToEndAsync();
-
-                using var db = new RetroRecDb();
-                var room = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
-                if (room != null)
+                try
                 {
-                    room.DataBlob = body;
-                    room.ModifiedAt = DateTime.UtcNow;
-                    db.SaveChanges();
+                    var doc = System.Text.Json.JsonDocument.Parse(body);
+                    var root = doc.RootElement;
+                    foreach (var propName in new[] { "dataBlob", "DataBlob", "data", "Data" })
+                    {
+                        if (root.TryGetProperty(propName, out var blobEl))
+                        {
+                            dataBlob = blobEl.GetString() ?? body;
+                            break;
+                        }
+                    }
                 }
+                catch { }
             }
-            catch { }
 
-            return Ok(new { });
+            using var db = new RetroRecDb();
+            var room = db.UserRooms.FirstOrDefault(u => u.Id == roomId - USER_ROOM_ID_BASE);
+            if (room == null)
+                return NotFound(new { error = "Room not found" });
+
+            room.DataBlob = dataBlob;
+            room.ModifiedAt = DateTime.UtcNow;
+            db.SaveChanges();
+
+            // Return the full updated room object so the client can confirm the
+            // save succeeded. Returning {} caused the client to report "save failed."
+            return Pascal(ExpandUserRoom(room));
         }
 
         // Mark a user room as published — flips IsPublished=true and changes
@@ -717,23 +780,15 @@ namespace RetroRec_Server.Controllers
             if (playerId == 0) playerId = 2;
             UserRoomInstances[playerId] = roomInstance;
 
+            // When the party leader moves to a room, silently update every member's
+            // tracked room instance so their next heartbeat returns the leader's
+            // instance and the client auto-follows without popping an accept/decline
+            // dialog. Injecting a synthetic invite into PartyState.Invites was the
+            // original approach but it caused the client to show a party-follow
+            // notification/prompt every time the leader changed rooms.
             foreach (var kvp in PartyState.MemberOf.Where(m => m.Value == playerId))
             {
-                // Immediately update the member's room so their next heartbeat
-                // returns the leader's room instance and the client auto-follows.
                 UserRoomInstances[kvp.Key] = roomInstance;
-
-                var followKey = $"party_{playerId}_{kvp.Key}";
-                PartyState.Invites[followKey] = new InviteData
-                {
-                    InviteId = followKey,
-                    SenderId = playerId,
-                    TargetId = kvp.Key,
-                    RoomName = roomName,
-                    RoomId = roomId,
-                    IsPartyInvite = true,
-                    CreatedAt = DateTime.UtcNow
-                };
             }
 
             return Pascal(new

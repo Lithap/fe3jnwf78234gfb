@@ -330,17 +330,26 @@ namespace RetroRec_Server.Controllers
 
                 bool iSent = sender == myId;
                 int otherId = iSent ? target : sender;
-                bool theyAlsoSent = PartyState.FriendRequests.ContainsKey($"{otherId}_{myId}");
 
-                if (!iSent && theyAlsoSent) continue;
+                // Check whether the other side ALSO sent a request (mutual = both directions exist).
+                bool theyAlsoSent = PartyState.FriendRequests.ContainsKey($"{otherId}_{myId}");
+                // Check whether I also sent a request back to them.
+                bool iAlsoSent = PartyState.FriendRequests.ContainsKey($"{myId}_{otherId}");
+
+                // For mutual friendships deduplicate: emit only the entry where I was the
+                // original sender (iSent=true). The mirror entry (iSent=false but iAlsoSent=true)
+                // would double-count. Previously this check used theyAlsoSent which evaluates
+                // to true for ANY incoming entry (because the key A_B always exists when we're
+                // iterating A_B), causing ALL incoming requests to be skipped.
+                if (!iSent && iAlsoSent) continue;
 
                 int relType;
-                if (theyAlsoSent)
-                    relType = 4;
+                if (iSent && theyAlsoSent)
+                    relType = 4;  // mutual
                 else if (iSent)
-                    relType = 2;
+                    relType = 2;  // outgoing pending
                 else
-                    relType = 3;
+                    relType = 3;  // incoming pending
 
                 results.Add(new
                 {
@@ -360,7 +369,7 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/relationships/v2/sendfriendrequest")]
         [HttpGet("/relationships/v2/sendfriendrequest")]
         [HttpPost("/relationships/v2/sendfriendrequest")]
-        public IActionResult AddFriend(
+        public async Task<IActionResult> AddFriend(
             [FromQuery] int id = 0,
             [FromQuery] int accountId = 0,
             [FromQuery] int targetId = 0,
@@ -368,10 +377,45 @@ namespace RetroRec_Server.Controllers
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
+
             int friendId = id != 0 ? id
                          : accountId != 0 ? accountId
                          : targetId != 0 ? targetId
                          : targetAccountId;
+
+            // Query params might be absent — fall back to form body then JSON body.
+            if (friendId == 0 && Request.HasFormContentType)
+            {
+                if (Request.Form.TryGetValue("id", out var fId) && int.TryParse(fId, out var fIdVal) && fIdVal != 0)
+                    friendId = fIdVal;
+                else if (Request.Form.TryGetValue("accountId", out var fAid) && int.TryParse(fAid, out var fAidVal) && fAidVal != 0)
+                    friendId = fAidVal;
+                else if (Request.Form.TryGetValue("targetId", out var fTid) && int.TryParse(fTid, out var fTidVal) && fTidVal != 0)
+                    friendId = fTidVal;
+                else if (Request.Form.TryGetValue("targetAccountId", out var fTaid) && int.TryParse(fTaid, out var fTaidVal) && fTaidVal != 0)
+                    friendId = fTaidVal;
+            }
+
+            if (friendId == 0)
+            {
+                try
+                {
+                    using var reader = new System.IO.StreamReader(Request.Body);
+                    var body = await reader.ReadToEndAsync();
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        var doc = System.Text.Json.JsonDocument.Parse(body);
+                        var root = doc.RootElement;
+                        foreach (var propName in new[] { "id", "accountId", "targetId", "targetAccountId" })
+                        {
+                            if (root.TryGetProperty(propName, out var el) && el.TryGetInt32(out var val) && val != 0)
+                            { friendId = val; break; }
+                        }
+                    }
+                }
+                catch { }
+            }
+
             if (friendId == 0) return Pascal(new { ErrorCode = 0 });
             PartyState.FriendRequests.TryAdd($"{myId}_{friendId}", true);
             bool mutual = PartyState.FriendRequests.ContainsKey($"{friendId}_{myId}");
