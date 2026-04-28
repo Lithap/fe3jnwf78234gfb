@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
@@ -8,19 +10,44 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 var app = builder.Build();
 
-// Ensure the SQLite schema exists on startup. EnsureCreated is idempotent
-// (no-ops if everything is already there) and crucially also creates any
-// NEW tables we add — Bios and FriendRelationships ship in this version
-// so that bios and friend-requests survive server restarts. Existing
-// Accounts / Rooms / UserRooms data is left untouched.
+// Ensure the SQLite schema exists on startup.
 //
-// Note: EnsureCreated does not run migrations — if we later change a
-// column on an existing table, that needs a real migration. Adding new
-// tables is fine.
+// EnsureCreated() only creates the schema if the database file is missing —
+// for servers with an existing retrorec.db (which is everyone who's been
+// running RetroRec for more than five minutes), it sees the file already
+// exists and SKIPS bootstrapping entirely, so any newly-added tables like
+// Bios / FriendRelationships never get created. The friend-request flow
+// then crashes with `SqliteException: no such table: FriendRelationships`.
+//
+// Workaround: call EnsureCreated() to handle the brand-new-DB case, then
+// follow up with CREATE TABLE IF NOT EXISTS for every new table we add
+// after the initial schema. This is idempotent and works for both fresh
+// installs and existing DBs without needing EF migrations infrastructure.
 using (var scope = app.Services.CreateScope())
 {
     using var db = new RetroRecDb();
     db.Database.EnsureCreated();
+
+    db.Database.ExecuteSqlRaw(@"
+        CREATE TABLE IF NOT EXISTS ""Bios"" (
+            ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_Bios"" PRIMARY KEY AUTOINCREMENT,
+            ""AccountId"" INTEGER NOT NULL,
+            ""Bio"" TEXT NOT NULL,
+            ""UpdatedAt"" TEXT NOT NULL
+        );");
+    db.Database.ExecuteSqlRaw(@"
+        CREATE INDEX IF NOT EXISTS ""IX_Bios_AccountId"" ON ""Bios"" (""AccountId"");");
+
+    db.Database.ExecuteSqlRaw(@"
+        CREATE TABLE IF NOT EXISTS ""FriendRelationships"" (
+            ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_FriendRelationships"" PRIMARY KEY AUTOINCREMENT,
+            ""SenderId"" INTEGER NOT NULL,
+            ""TargetId"" INTEGER NOT NULL,
+            ""CreatedAt"" TEXT NOT NULL
+        );");
+    db.Database.ExecuteSqlRaw(@"
+        CREATE INDEX IF NOT EXISTS ""IX_FriendRelationships_SenderId_TargetId""
+            ON ""FriendRelationships"" (""SenderId"", ""TargetId"");");
 }
 
 app.Use(async (context, next) =>
