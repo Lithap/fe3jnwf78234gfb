@@ -96,6 +96,19 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/api/messages/v2/get")]
         public IActionResult MessagesGet() => Ok(new object[] { });
 
+        // Text chat moderation / filter — client POSTs the outgoing message and
+        // expects 200 + JSON with a purified string. Without this, requests hit
+        // the image catchall (404) and the UI shows "Error purifying string".
+        [HttpPost("/api/chat/v2/purify")]
+        [HttpPost("/chat/v2/purify")]
+        [HttpPost("/api/chat/v1/purify")]
+        [HttpPost("/chat/v1/purify")]
+        public IActionResult ChatPurify()
+        {
+            // Echo-through stub: no profanity filter server-side for RetroRec.
+            return Pascal(new { PurifiedText = "", ErrorCode = 0 });
+        }
+
         [HttpGet("/thread")]
         public IActionResult Thread() => Ok(new object[] { });
 

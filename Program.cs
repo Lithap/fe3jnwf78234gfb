@@ -1,14 +1,26 @@
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor |
+        ForwardedHeaders.XForwardedProto |
+        ForwardedHeaders.XForwardedHost;
+    // Accept forwarded headers from reverse proxies (ngrok, nginx, etc.).
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.ListenAnyIP(80);
     options.ListenAnyIP(2059);
 });
 var app = builder.Build();
+
+app.UseForwardedHeaders();
 
 // Ensure the SQLite schema exists on startup.
 //
@@ -83,18 +95,6 @@ app.Use(async (context, next) =>
 {
     Console.WriteLine($"[REQUEST] {context.Request.Method} {context.Request.Path}{context.Request.QueryString}");
 
-    // Buffer the request body so we can log it if this turns out to be a 404.
-    // EnableBuffering must be called BEFORE we read, so controllers can re-read it afterwards.
-    context.Request.EnableBuffering();
-    string requestBody = "";
-    if (context.Request.ContentLength.GetValueOrDefault() > 0)
-    {
-        if (context.Request.Body.CanSeek) context.Request.Body.Position = 0;
-        using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
-        requestBody = await reader.ReadToEndAsync();
-        if (context.Request.Body.CanSeek) context.Request.Body.Position = 0;
-    }
-
     var originalBody = context.Response.Body;
     await using var newBody = new MemoryStream();
     context.Response.Body = newBody;
@@ -111,11 +111,12 @@ app.Use(async (context, next) =>
         if (context.Response.StatusCode == 404)
         {
             // Make missing endpoints visually impossible to miss in the console.
+            // Do not read the request body here: pre-reading breaks model binding,
+            // SignalR negotiate, and triggers Kestrel BadHttpRequestException when
+            // Content-Length is set but the client disconnects mid-body.
             Console.WriteLine("");
             Console.WriteLine("--------------------------------------------");
             Console.WriteLine($"!!! MISSING ENDPOINT: {context.Request.Method} {context.Request.Path}{context.Request.QueryString}");
-            if (!string.IsNullOrWhiteSpace(requestBody))
-                Console.WriteLine($"Request Body: {requestBody}");
             Console.WriteLine("--------------------------------------------");
             Console.WriteLine("");
         }
