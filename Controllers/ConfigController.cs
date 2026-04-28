@@ -1,3 +1,5 @@
+using System;
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -19,14 +21,14 @@ namespace RetroRec_Server.Controllers
         // CdnBaseUri / ShareBaseUrl must match the hostname the client actually
         // uses (from name server + forwarded headers). Hardcoding an old ngrok
         // URL breaks images, shares, and anything that builds absolute URLs.
-        private static string BuildConfigV2Json(HttpRequest request)
-        {
-            var baseWithSlash = PublicUrlHelper.GetPublicBaseUrlWithTrailingSlash(request);
-            var baseNoSlash = baseWithSlash.TrimEnd('/');
-            return $@"{{
+        //
+        // Do NOT use $"..." or $@"..." for the JSON body: every `{` in the JSON
+        // would be parsed as an interpolation hole and break the build.
+        private static readonly string ConfigV2JsonTemplate = @"
+{
   ""MessageOfTheDay"": ""Welcome to RetroRec! Be excellent to each other!"",
-  ""CdnBaseUri"": ""{baseWithSlash.Replace("\"", "\\\"")}"",
-  ""ShareBaseUrl"": ""{baseNoSlash.Replace("\"", "\\\"")}/{{0}}"",
+  ""CdnBaseUri"": __CDN_URI__,
+  ""ShareBaseUrl"": __SHARE_BASE__,
   ""LevelProgressionMaps"": [],
   ""MatchmakingParams"": {
     ""PreferFullRoomsFrequency"": 1,
@@ -60,7 +62,17 @@ namespace RetroRec_Server.Controllers
     ""MicSpamSamplePercentageForForceMuteToEnd"": 0,
     ""MicSpamWarningStateVolumeMultiplier"": 0
   }
-}}";
+}
+";
+
+        private static string BuildConfigV2Json(HttpRequest request)
+        {
+            var cdnUri = PublicUrlHelper.GetPublicBaseUrlWithTrailingSlash(request);
+            var shareUri = PublicUrlHelper.GetPublicBaseUrl(request).TrimEnd('/') + "/{0}";
+            return ConfigV2JsonTemplate
+                .Trim()
+                .Replace("__CDN_URI__", JsonSerializer.Serialize(cdnUri))
+                .Replace("__SHARE_BASE__", JsonSerializer.Serialize(shareUri));
         }
 
         [HttpGet("/api/config/v2")]
@@ -72,27 +84,27 @@ namespace RetroRec_Server.Controllers
         // entries here as new "GameConfig not found:" warnings appear in logs.
         [HttpGet("/api/gameconfigs/v1/all")]
         public IActionResult GameConfigs() => Ok(new object[] {
-            new { Key = "Gift.MaxDaily", Value = "100", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Gift.Falloff", Value = "1", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Gift.DropChance", Value = "100", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "UseHeartbeatWebSocket", Value = "0", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Screens.ForceVerification", Value = "0", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "forceRegistration", Value = "0", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Creative.Query", Value = "#puzzle", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Creative.Title", Value = "PUZZLE", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Featured.Query", Value = "#featured", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Featured.Title", Value = "Featured", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Quests.Query", Value = "#quest", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Quests.Title", Value = "QUESTS", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Shooters.Query", Value = "#pvp", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Shooters.Title", Value = "PVP", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Sports.Query", Value = "#sport", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Sports.Title", Value = "SPORTS & REC", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "UGC.Persistence.AutosaveIntervalSeconds", Value = "60", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "UGC.RoomSavingEnabled", Value = "1", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "UGC.MaxChipsVisible", Value = "5000", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Rewards.UseRewardSelection", Value = "0", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "ClickOnName.MaxRaycastDistance", Value = "5", StartTime = (string)null, EndTime = (string)null }
+            new { Key = "Gift.MaxDaily", Value = "100", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Gift.Falloff", Value = "1", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Gift.DropChance", Value = "100", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "UseHeartbeatWebSocket", Value = "0", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Screens.ForceVerification", Value = "0", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "forceRegistration", Value = "0", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Creative.Query", Value = "#puzzle", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Creative.Title", Value = "PUZZLE", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Featured.Query", Value = "#featured", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Featured.Title", Value = "Featured", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Quests.Query", Value = "#quest", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Quests.Title", Value = "QUESTS", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Shooters.Query", Value = "#pvp", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Shooters.Title", Value = "PVP", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Sports.Query", Value = "#sport", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Sports.Title", Value = "SPORTS & REC", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "UGC.Persistence.AutosaveIntervalSeconds", Value = "60", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "UGC.RoomSavingEnabled", Value = "1", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "UGC.MaxChipsVisible", Value = "5000", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Rewards.UseRewardSelection", Value = "0", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "ClickOnName.MaxRaycastDistance", Value = "5", StartTime = (string?)null, EndTime = (string?)null }
         });
 
         [HttpGet("/api/config/v1/amplitude")]
@@ -102,16 +114,16 @@ namespace RetroRec_Server.Controllers
         public IActionResult VersionCheck() => Ok(new { versionStatus = 0 });
 
         [HttpGet("/config/LoadingScreenTipData")]
-        public IActionResult LoadingTips() => Ok(new object[] { });
+        public IActionResult LoadingTips() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/announcement/v1/get")]
-        public IActionResult Announcement() => Ok(new object[] { });
+        public IActionResult Announcement() => Ok(Array.Empty<object>());
 
         [HttpGet("/announcements/v2/mine/unread")]
-        public IActionResult AnnouncementsUnread() => Ok(new object[] { });
+        public IActionResult AnnouncementsUnread() => Ok(Array.Empty<object>());
 
         [HttpGet("/announcements/v2/subscription/mine/unread")]
-        public IActionResult AnnouncementsSubscriptionUnread() => Ok(new object[] { });
+        public IActionResult AnnouncementsSubscriptionUnread() => Ok(Array.Empty<object>());
 
         // Per-user client settings (graphics, voice, comfort options, etc.)
         // Returning a populated list with sensible defaults stops the client
