@@ -537,8 +537,11 @@ namespace RetroRec_Server.Controllers
             string body;
             try
             {
-                using var reader = new StreamReader(Request.Body);
+                Request.EnableBuffering();
+                Request.Body.Position = 0;
+                using var reader = new StreamReader(Request.Body, leaveOpen: true);
                 body = await reader.ReadToEndAsync();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
             }
             catch (Exception ex)
             {
@@ -746,6 +749,10 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/goto/room/{roomName}")]
         [HttpPost("/goto/room/{roomName}/{subRoomName}")]
         [HttpGet("/goto/room/{roomName}/{subRoomName}")]
+        [HttpPost("/goto/{roomName}")]
+        [HttpGet("/goto/{roomName}")]
+        [HttpPost("/goto/{roomName}/{subRoomName}")]
+        [HttpGet("/goto/{roomName}/{subRoomName}")]
         [HttpPost("/matchmaking/v1/goto/room/{roomName}")]
         [HttpGet("/matchmaking/v1/goto/room/{roomName}")]
         [HttpPost("/matchmaking/v1/goto/room/{roomName}/{subRoomName}")]
@@ -774,6 +781,8 @@ namespace RetroRec_Server.Controllers
 
         [HttpPost("/goto/roomId/{roomId:int}")]
         [HttpGet("/goto/roomId/{roomId:int}")]
+        [HttpPost("/goto/{roomId:int}")]
+        [HttpGet("/goto/{roomId:int}")]
         [HttpPost("/matchmaking/v1/goto/roomId/{roomId:int}")]
         [HttpGet("/matchmaking/v1/goto/roomId/{roomId:int}")]
         [HttpPost("/api/matchmaking/v1/goto/roomId/{roomId:int}")]
@@ -972,6 +981,7 @@ namespace RetroRec_Server.Controllers
             {
                 using var ms = new System.IO.MemoryStream();
                 await Request.Body.CopyToAsync(ms);
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
                 if (ms.Length > 0) imageData = ms.ToArray();
             }
 

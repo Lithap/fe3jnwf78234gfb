@@ -246,14 +246,28 @@ namespace RetroRec_Server.Controllers
         // name as a no-op. Persisted to the Accounts table immediately.
         [HttpPut("account/me/displayName")]
         [HttpPost("account/me/displayName")]
+        [HttpPatch("account/me/displayName")]
         [HttpPut("api/account/me/displayName")]
         [HttpPost("api/account/me/displayName")]
+        [HttpPatch("api/account/me/displayName")]
         [HttpPut("account/me/username")]
         [HttpPost("account/me/username")]
+        [HttpPatch("account/me/username")]
         [HttpPut("api/account/me/username")]
         [HttpPost("api/account/me/username")]
+        [HttpPatch("api/account/me/username")]
         [HttpPut("account/me")]
+        [HttpPost("account/me")]
+        [HttpPatch("account/me")]
         [HttpPut("api/account/me")]
+        [HttpPost("api/account/me")]
+        [HttpPatch("api/account/me")]
+        [HttpPost("account/me/profile")]
+        [HttpPost("api/account/me/profile")]
+        [HttpPut("account/me/profile")]
+        [HttpPut("api/account/me/profile")]
+        [HttpPatch("account/me/profile")]
+        [HttpPatch("api/account/me/profile")]
         public async Task<IActionResult> RenameMe()
         {
             int accountId = GetAccountIdFromAuth();
@@ -263,8 +277,11 @@ namespace RetroRec_Server.Controllers
 
             try
             {
-                using var reader = new StreamReader(Request.Body);
+                Request.EnableBuffering();
+                Request.Body.Position = 0;
+                using var reader = new StreamReader(Request.Body, leaveOpen: true);
                 var body = await reader.ReadToEndAsync();
+                Request.Body.Position = 0;
                 if (!string.IsNullOrWhiteSpace(body))
                 {
                     if (body.TrimStart().StartsWith("{"))
@@ -286,7 +303,7 @@ namespace RetroRec_Server.Controllers
 
             if (chosenName == null && Request.HasFormContentType)
             {
-                foreach (var key in new[] { "displayName", "username", "name" })
+                foreach (var key in new[] { "displayName", "DisplayName", "username", "Username", "name", "Name" })
                 {
                     if (Request.Form.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v))
                     {
@@ -298,7 +315,7 @@ namespace RetroRec_Server.Controllers
 
             if (chosenName == null)
             {
-                foreach (var key in new[] { "displayName", "username", "name" })
+                foreach (var key in new[] { "displayName", "DisplayName", "username", "Username", "name", "Name" })
                 {
                     if (Request.Query.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v))
                     {
@@ -343,9 +360,14 @@ namespace RetroRec_Server.Controllers
         [HttpGet("api/account/usernameAvailable")]
         [HttpGet("account/checkusername")]
         [HttpGet("api/account/checkusername")]
-        public IActionResult UsernameAvailable([FromQuery] string username)
+        [HttpGet("account/me/usernameAvailable")]
+        [HttpGet("api/account/me/usernameAvailable")]
+        [HttpGet("account/me/checkusername")]
+        [HttpGet("api/account/me/checkusername")]
+        public IActionResult UsernameAvailable([FromQuery] string username, [FromQuery] string name = null, [FromQuery] string displayName = null)
         {
             int myId = GetAccountIdFromAuth();
+            username = username ?? name ?? displayName;
             if (string.IsNullOrWhiteSpace(username))
                 return Pascal(new { Username = username ?? "", Available = false });
 

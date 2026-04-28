@@ -246,8 +246,11 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/account/{id}/bio")]
         public async Task<IActionResult> SetBio(long id)
         {
-            using var reader = new System.IO.StreamReader(Request.Body);
+            Request.EnableBuffering();
+            Request.Body.Position = 0;
+            using var reader = new System.IO.StreamReader(Request.Body, leaveOpen: true);
             var body = await reader.ReadToEndAsync();
+            if (Request.Body.CanSeek) Request.Body.Position = 0;
             string? bio = null;
 
             try
@@ -381,6 +384,10 @@ namespace RetroRec_Server.Controllers
         //   type 4 = Both sent requests = mutual friends
         [HttpGet("/api/relationships/v2/get")]
         [HttpGet("/relationships/v2/get")]
+        [HttpGet("/api/relationships/v1/get")]
+        [HttpGet("/relationships/v1/get")]
+        [HttpGet("/api/relationships/v2/getall")]
+        [HttpGet("/relationships/v2/getall")]
         public IActionResult RelationshipsV2Get()
         {
             int myId = GetAccountIdFromAuth();
@@ -494,27 +501,55 @@ namespace RetroRec_Server.Controllers
 
         [HttpGet("/api/relationships/v2/addfriend")]
         [HttpPost("/api/relationships/v2/addfriend")]
+        [HttpPut("/api/relationships/v2/addfriend")]
         [HttpGet("/relationships/v2/addfriend")]
         [HttpPost("/relationships/v2/addfriend")]
+        [HttpPut("/relationships/v2/addfriend")]
         [HttpGet("/api/relationships/v2/sendfriendrequest")]
         [HttpPost("/api/relationships/v2/sendfriendrequest")]
+        [HttpPut("/api/relationships/v2/sendfriendrequest")]
         [HttpGet("/relationships/v2/sendfriendrequest")]
         [HttpPost("/relationships/v2/sendfriendrequest")]
+        [HttpPut("/relationships/v2/sendfriendrequest")]
         // Path-style variants — client sometimes posts the id as the last
         // path segment (e.g. POST /api/relationships/v2/addfriend/1234).
         [HttpGet("/api/relationships/v2/addfriend/{routeId:int}")]
         [HttpPost("/api/relationships/v2/addfriend/{routeId:int}")]
+        [HttpPut("/api/relationships/v2/addfriend/{routeId:int}")]
         [HttpGet("/relationships/v2/addfriend/{routeId:int}")]
         [HttpPost("/relationships/v2/addfriend/{routeId:int}")]
+        [HttpPut("/relationships/v2/addfriend/{routeId:int}")]
         [HttpGet("/api/relationships/v2/sendfriendrequest/{routeId:int}")]
         [HttpPost("/api/relationships/v2/sendfriendrequest/{routeId:int}")]
+        [HttpPut("/api/relationships/v2/sendfriendrequest/{routeId:int}")]
         [HttpGet("/relationships/v2/sendfriendrequest/{routeId:int}")]
         [HttpPost("/relationships/v2/sendfriendrequest/{routeId:int}")]
+        [HttpPut("/relationships/v2/sendfriendrequest/{routeId:int}")]
         // Some client builds POST to /api/relationships/v2/{id}/addfriend
         [HttpPost("/api/relationships/v2/{routeId:int}/addfriend")]
         [HttpPost("/relationships/v2/{routeId:int}/addfriend")]
         [HttpPost("/api/relationships/v2/{routeId:int}/sendfriendrequest")]
         [HttpPost("/relationships/v2/{routeId:int}/sendfriendrequest")]
+        [HttpGet("/api/relationships/v1/addfriend")]
+        [HttpPost("/api/relationships/v1/addfriend")]
+        [HttpGet("/relationships/v1/addfriend")]
+        [HttpPost("/relationships/v1/addfriend")]
+        [HttpGet("/api/relationships/v1/sendfriendrequest")]
+        [HttpPost("/api/relationships/v1/sendfriendrequest")]
+        [HttpGet("/relationships/v1/sendfriendrequest")]
+        [HttpPost("/relationships/v1/sendfriendrequest")]
+        [HttpGet("/api/relationships/v1/addfriend/{routeId:int}")]
+        [HttpPost("/api/relationships/v1/addfriend/{routeId:int}")]
+        [HttpGet("/relationships/v1/addfriend/{routeId:int}")]
+        [HttpPost("/relationships/v1/addfriend/{routeId:int}")]
+        [HttpGet("/api/relationships/v1/sendfriendrequest/{routeId:int}")]
+        [HttpPost("/api/relationships/v1/sendfriendrequest/{routeId:int}")]
+        [HttpGet("/relationships/v1/sendfriendrequest/{routeId:int}")]
+        [HttpPost("/relationships/v1/sendfriendrequest/{routeId:int}")]
+        [HttpPost("/api/relationships/v1/{routeId:int}/addfriend")]
+        [HttpPost("/relationships/v1/{routeId:int}/addfriend")]
+        [HttpPost("/api/relationships/v1/{routeId:int}/sendfriendrequest")]
+        [HttpPost("/relationships/v1/{routeId:int}/sendfriendrequest")]
         public IActionResult AddFriend(
             int routeId = 0,
             [FromQuery] int id = 0,
