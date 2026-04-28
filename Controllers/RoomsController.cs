@@ -537,8 +537,11 @@ namespace RetroRec_Server.Controllers
             string body;
             try
             {
-                using var reader = new StreamReader(Request.Body);
+                Request.EnableBuffering();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
+                using var reader = new StreamReader(Request.Body, leaveOpen: true);
                 body = await reader.ReadToEndAsync();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
             }
             catch (Exception ex)
             {
@@ -750,10 +753,18 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/matchmaking/v1/goto/room/{roomName}")]
         [HttpPost("/matchmaking/v1/goto/room/{roomName}/{subRoomName}")]
         [HttpGet("/matchmaking/v1/goto/room/{roomName}/{subRoomName}")]
+        [HttpPost("/matchmaking/v2/goto/room/{roomName}")]
+        [HttpGet("/matchmaking/v2/goto/room/{roomName}")]
+        [HttpPost("/matchmaking/v2/goto/room/{roomName}/{subRoomName}")]
+        [HttpGet("/matchmaking/v2/goto/room/{roomName}/{subRoomName}")]
         [HttpPost("/api/matchmaking/v1/goto/room/{roomName}")]
         [HttpGet("/api/matchmaking/v1/goto/room/{roomName}")]
         [HttpPost("/api/matchmaking/v1/goto/room/{roomName}/{subRoomName}")]
         [HttpGet("/api/matchmaking/v1/goto/room/{roomName}/{subRoomName}")]
+        [HttpPost("/api/matchmaking/v2/goto/room/{roomName}")]
+        [HttpGet("/api/matchmaking/v2/goto/room/{roomName}")]
+        [HttpPost("/api/matchmaking/v2/goto/room/{roomName}/{subRoomName}")]
+        [HttpGet("/api/matchmaking/v2/goto/room/{roomName}/{subRoomName}")]
         public IActionResult GotoRoom(string roomName, string subRoomName = null)
         {
             int roomId = RRConstants.RoomNameToId(roomName);
@@ -776,8 +787,12 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/goto/roomId/{roomId:int}")]
         [HttpPost("/matchmaking/v1/goto/roomId/{roomId:int}")]
         [HttpGet("/matchmaking/v1/goto/roomId/{roomId:int}")]
+        [HttpPost("/matchmaking/v2/goto/roomId/{roomId:int}")]
+        [HttpGet("/matchmaking/v2/goto/roomId/{roomId:int}")]
         [HttpPost("/api/matchmaking/v1/goto/roomId/{roomId:int}")]
         [HttpGet("/api/matchmaking/v1/goto/roomId/{roomId:int}")]
+        [HttpPost("/api/matchmaking/v2/goto/roomId/{roomId:int}")]
+        [HttpGet("/api/matchmaking/v2/goto/roomId/{roomId:int}")]
         public IActionResult GotoRoomId(int roomId)
         {
             string roomName;

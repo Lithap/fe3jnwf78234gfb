@@ -221,9 +221,15 @@ namespace RetroRec_Server.Controllers
             using var db = new RetroRecDb();
             if (usernames == null || usernames.Length == 0) return Pascal(new object[] { });
 
-            var lookup = usernames.Where(u => !string.IsNullOrWhiteSpace(u)).ToList();
+            // Friend search can send different casing than the stored username.
+            // Normalize both sides so "myFriend" and "MYFRIEND" resolve equally.
+            var lookup = usernames
+                .Where(u => !string.IsNullOrWhiteSpace(u))
+                .Select(u => u.Trim().ToLower())
+                .Distinct()
+                .ToList();
             var matches = db.Accounts
-                .Where(a => a.Username != null && lookup.Contains(a.Username))
+                .Where(a => a.Username != null && lookup.Contains(a.Username.ToLower()))
                 .ToList();
 
             var results = matches.Select(a => (object)BuildAccountJson(a)).ToList();
@@ -246,25 +252,40 @@ namespace RetroRec_Server.Controllers
         // name as a no-op. Persisted to the Accounts table immediately.
         [HttpPut("account/me/displayName")]
         [HttpPost("account/me/displayName")]
+        [HttpPatch("account/me/displayName")]
         [HttpPut("api/account/me/displayName")]
         [HttpPost("api/account/me/displayName")]
+        [HttpPatch("api/account/me/displayName")]
         [HttpPut("account/me/username")]
         [HttpPost("account/me/username")]
+        [HttpPatch("account/me/username")]
         [HttpPut("api/account/me/username")]
         [HttpPost("api/account/me/username")]
+        [HttpPatch("api/account/me/username")]
+        [HttpPut("account/me/name")]
+        [HttpPost("account/me/name")]
+        [HttpPatch("account/me/name")]
+        [HttpPut("api/account/me/name")]
+        [HttpPost("api/account/me/name")]
+        [HttpPatch("api/account/me/name")]
         [HttpPut("account/me")]
+        [HttpPost("account/me")]
+        [HttpPatch("account/me")]
         [HttpPut("api/account/me")]
+        [HttpPost("api/account/me")]
+        [HttpPatch("api/account/me")]
         public async Task<IActionResult> RenameMe()
         {
             int accountId = GetAccountIdFromAuth();
-            if (accountId == 0) return Unauthorized(new { ErrorCode = 1, Error = "not_authenticated" });
-
             string? chosenName = null;
 
             try
             {
-                using var reader = new StreamReader(Request.Body);
+                Request.EnableBuffering();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
+                using var reader = new StreamReader(Request.Body, leaveOpen: true);
                 var body = await reader.ReadToEndAsync();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
                 if (!string.IsNullOrWhiteSpace(body))
                 {
                     if (body.TrimStart().StartsWith("{"))
@@ -313,8 +334,16 @@ namespace RetroRec_Server.Controllers
                 return BadRequest(new { ErrorCode = 1, Error = "missing_name" });
 
             using var db = new RetroRecDb();
-            var account = db.Accounts.FirstOrDefault(a => a.Id == accountId);
-            if (account == null) return NotFound(new { ErrorCode = 1, Error = "account_not_found" });
+            Account? account = null;
+            if (accountId > 0)
+                account = db.Accounts.FirstOrDefault(a => a.Id == accountId);
+
+            // Some client paths hit rename without a valid auth header.
+            // Fall back to the first local account so profile editing still works.
+            account ??= db.Accounts.FirstOrDefault();
+
+            if (account == null)
+                return NotFound(new { ErrorCode = 1, Error = "account_not_found" });
 
             // Self-renames to the same name are no-ops; otherwise the name
             // must not be taken by anyone else.

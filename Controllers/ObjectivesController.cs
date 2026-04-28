@@ -108,9 +108,11 @@ namespace RetroRec_Server.Controllers
         {
             try
             {
-                Request.Body.Position = 0;
-                using var reader = new StreamReader(Request.Body);
+                Request.EnableBuffering();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
+                using var reader = new StreamReader(Request.Body, leaveOpen: true);
                 var json = await reader.ReadToEndAsync();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.TryGetProperty("IsCompleted", out var prop) &&
                     prop.ValueKind == JsonValueKind.True)
@@ -136,9 +138,11 @@ namespace RetroRec_Server.Controllers
         {
             try
             {
-                Request.Body.Position = 0;
-                using var reader = new StreamReader(Request.Body);
+                Request.EnableBuffering();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
+                using var reader = new StreamReader(Request.Body, leaveOpen: true);
                 var json = await reader.ReadToEndAsync();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 {
@@ -161,9 +165,11 @@ namespace RetroRec_Server.Controllers
         {
             try
             {
-                Request.Body.Position = 0;
-                using var reader = new StreamReader(Request.Body);
+                Request.EnableBuffering();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
+                using var reader = new StreamReader(Request.Body, leaveOpen: true);
                 var json = await reader.ReadToEndAsync();
+                if (Request.Body.CanSeek) Request.Body.Position = 0;
                 using var doc = JsonDocument.Parse(json);
                 if (doc.RootElement.ValueKind == JsonValueKind.Array)
                 {
