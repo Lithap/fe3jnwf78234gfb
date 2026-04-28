@@ -242,12 +242,13 @@ namespace RetroRec_Server.Controllers
         // the user sees their change immediately.
         [HttpPut("/account/{id}/bio")]
         [HttpPut("/api/account/{id}/bio")]
+        [HttpPatch("/account/{id}/bio")]
+        [HttpPatch("/api/account/{id}/bio")]
         [HttpPost("/account/{id}/bio")]
         [HttpPost("/api/account/{id}/bio")]
         public async Task<IActionResult> SetBio(long id)
         {
-            using var reader = new System.IO.StreamReader(Request.Body);
-            var body = await reader.ReadToEndAsync();
+            var body = await ReadRequestBodyAsync();
             string? bio = null;
 
             try
@@ -319,7 +320,11 @@ namespace RetroRec_Server.Controllers
         }
 
         [HttpPut("/account/me/bio")]
+        [HttpPost("/account/me/bio")]
+        [HttpPatch("/account/me/bio")]
         [HttpPut("/api/account/me/bio")]
+        [HttpPost("/api/account/me/bio")]
+        [HttpPatch("/api/account/me/bio")]
         public async Task<IActionResult> SetMyBio()
         {
             int myId = GetAccountIdFromAuth();

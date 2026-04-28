@@ -117,12 +117,111 @@ namespace RetroRec_Server.Controllers
         // and why friend/party/bio UIs broke (they all key off
         // DisplayName != "PlayerName" before showing anything).
         [HttpGet("account/bulk")]
-        public IActionResult AccountBulk([FromQuery(Name = "id")] int[] ids)
+        [HttpPost("account/bulk")]
+        [HttpGet("api/account/bulk")]
+        [HttpPost("api/account/bulk")]
+        [HttpGet("accounts/bulk")]
+        [HttpPost("accounts/bulk")]
+        [HttpGet("api/accounts/bulk")]
+        [HttpPost("api/accounts/bulk")]
+        public async Task<IActionResult> AccountBulk([FromQuery(Name = "id")] int[] ids)
         {
             using var db = new RetroRecDb();
-            if (ids == null || ids.Length == 0) return Pascal(new object[] { });
+            var requestedIds = new List<int>();
 
-            var distinct = ids.Where(i => i > 0).Distinct().ToList();
+            void AddIds(IEnumerable<int>? values)
+            {
+                if (values == null) return;
+                foreach (var value in values)
+                {
+                    if (value > 0)
+                        requestedIds.Add(value);
+                }
+            }
+
+            void AddIdsFromStrings(IEnumerable<string>? values)
+            {
+                if (values == null) return;
+                foreach (var value in values)
+                {
+                    if (string.IsNullOrWhiteSpace(value))
+                        continue;
+
+                    foreach (var part in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                    {
+                        if (int.TryParse(part, out var parsed) && parsed > 0)
+                            requestedIds.Add(parsed);
+                    }
+                }
+            }
+
+            AddIds(ids);
+
+            foreach (var key in new[] { "id", "ids", "accountId", "accountIds", "playerId", "playerIds" })
+            {
+                if (Request.Query.TryGetValue(key, out var values))
+                {
+                    AddIdsFromStrings(values);
+                }
+            }
+
+            if (Request.HasFormContentType)
+            {
+                foreach (var key in new[] { "id", "ids", "accountId", "accountIds", "playerId", "playerIds" })
+                {
+                    if (Request.Form.TryGetValue(key, out var values))
+                    {
+                        AddIdsFromStrings(values);
+                    }
+                }
+            }
+
+            try
+            {
+                var body = await ReadRequestBodyAsync();
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(body);
+                    if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    {
+                        AddIds(doc.RootElement.EnumerateArray()
+                            .Where(item => item.ValueKind == System.Text.Json.JsonValueKind.Number && item.TryGetInt32(out _))
+                            .Select(item => item.GetInt32()));
+                        AddIdsFromStrings(doc.RootElement.EnumerateArray()
+                            .Where(item => item.ValueKind == System.Text.Json.JsonValueKind.String)
+                            .Select(item => item.GetString() ?? ""));
+                    }
+                    else if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+                    {
+                        foreach (var key in new[] { "id", "ids", "accountId", "accountIds", "playerId", "playerIds" })
+                        {
+                            if (!doc.RootElement.TryGetProperty(key, out var el) &&
+                                !doc.RootElement.TryGetProperty(char.ToUpperInvariant(key[0]) + key.Substring(1), out el))
+                                continue;
+
+                            if (el.ValueKind == System.Text.Json.JsonValueKind.Number && el.TryGetInt32(out var parsed))
+                                requestedIds.Add(parsed);
+                            else if (el.ValueKind == System.Text.Json.JsonValueKind.String &&
+                                     !string.IsNullOrWhiteSpace(el.GetString()))
+                                AddIdsFromStrings(new[] { el.GetString() ?? "" });
+                            else if (el.ValueKind == System.Text.Json.JsonValueKind.Array)
+                            {
+                                AddIds(el.EnumerateArray()
+                                    .Where(item => item.ValueKind == System.Text.Json.JsonValueKind.Number && item.TryGetInt32(out _))
+                                    .Select(item => item.GetInt32()));
+                                AddIdsFromStrings(el.EnumerateArray()
+                                    .Where(item => item.ValueKind == System.Text.Json.JsonValueKind.String)
+                                    .Select(item => item.GetString() ?? ""));
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            if (requestedIds.Count == 0) return Pascal(new object[] { });
+
+            var distinct = requestedIds.Distinct().ToList();
             var accounts = db.Accounts
                 .Where(a => distinct.Contains(a.Id))
                 .ToDictionary(a => a.Id);
@@ -213,21 +312,105 @@ namespace RetroRec_Server.Controllers
         // Bulk lookup by username — same pattern as /account/bulk but
         // keyed off display name. Used by friend-search and @mention.
         [HttpGet("accounts/bulk/byUsername")]
+        [HttpPost("accounts/bulk/byUsername")]
         [HttpGet("account/bulk/byUsername")]
+        [HttpPost("account/bulk/byUsername")]
         [HttpGet("api/accounts/bulk/byUsername")]
+        [HttpPost("api/accounts/bulk/byUsername")]
         [HttpGet("api/account/bulk/byUsername")]
-        public IActionResult AccountBulkByUsername([FromQuery(Name = "username")] string[] usernames)
+        [HttpPost("api/account/bulk/byUsername")]
+        public async Task<IActionResult> AccountBulkByUsername([FromQuery(Name = "username")] string[] usernames)
         {
             using var db = new RetroRecDb();
-            if (usernames == null || usernames.Length == 0) return Pascal(new object[] { });
+            var lookup = new List<string>();
 
-            var lookup = usernames.Where(u => !string.IsNullOrWhiteSpace(u)).ToList();
-            var matches = db.Accounts
-                .Where(a => a.Username != null && lookup.Contains(a.Username))
+            void AddTerms(IEnumerable<string>? values)
+            {
+                if (values == null) return;
+                foreach (var value in values)
+                {
+                    var trimmed = value?.Trim();
+                    if (!string.IsNullOrWhiteSpace(trimmed))
+                        lookup.Add(trimmed);
+                }
+            }
+
+            AddTerms(usernames);
+
+            foreach (var key in new[] { "username", "displayName", "name", "query", "term", "searchTerm" })
+            {
+                if (Request.Query.TryGetValue(key, out var values))
+                    AddTerms(values);
+            }
+
+            if (Request.HasFormContentType)
+            {
+                foreach (var key in new[] { "username", "displayName", "name", "query", "term", "searchTerm" })
+                {
+                    if (Request.Form.TryGetValue(key, out var values))
+                        AddTerms(values);
+                }
+            }
+
+            try
+            {
+                var body = await ReadRequestBodyAsync();
+                if (!string.IsNullOrWhiteSpace(body) && body.TrimStart().StartsWith("{"))
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(body);
+                    foreach (var key in new[] { "username", "Username", "displayName", "DisplayName", "name", "Name", "query", "Query", "term", "Term", "searchTerm", "SearchTerm" })
+                    {
+                        if (!doc.RootElement.TryGetProperty(key, out var el))
+                            continue;
+
+                        if (el.ValueKind == System.Text.Json.JsonValueKind.String)
+                            AddTerms(new[] { el.GetString() ?? "" });
+                        else if (el.ValueKind == System.Text.Json.JsonValueKind.Array)
+                            AddTerms(el.EnumerateArray()
+                                .Where(item => item.ValueKind == System.Text.Json.JsonValueKind.String)
+                                .Select(item => item.GetString() ?? ""));
+                    }
+                }
+            }
+            catch { }
+
+            lookup = lookup
+                .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            var results = matches.Select(a => (object)BuildAccountJson(a)).ToList();
-            return Pascal(results);
+            if (lookup.Count == 0) return Pascal(new object[] { });
+
+            var matchIds = new HashSet<int>();
+            var matches = db.Accounts
+                .AsEnumerable()
+                .Where(a =>
+                    !string.IsNullOrWhiteSpace(a.Username) &&
+                    lookup.Any(term => a.Username!.Contains(term, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(a => lookup.Any(term => string.Equals(a.Username, term, StringComparison.OrdinalIgnoreCase)) ? 0 : 1)
+                .ThenBy(a => a.Username)
+                .Select(a =>
+                {
+                    matchIds.Add(a.Id);
+                    return (object)BuildAccountJson(a);
+                })
+                .ToList();
+
+            // Some friend-search flows probe by the numeric account id string.
+            foreach (var term in lookup)
+            {
+                if (int.TryParse(term, out var numericId) &&
+                    !matchIds.Contains(numericId))
+                {
+                    var byId = db.Accounts.FirstOrDefault(a => a.Id == numericId);
+                    if (byId != null)
+                    {
+                        matchIds.Add(byId.Id);
+                        matches.Add(BuildAccountJson(byId));
+                    }
+                }
+            }
+
+            return Pascal(matches);
         }
 
         // Same content as /account/me but the older `/api/account/me` /
@@ -246,25 +429,45 @@ namespace RetroRec_Server.Controllers
         // name as a no-op. Persisted to the Accounts table immediately.
         [HttpPut("account/me/displayName")]
         [HttpPost("account/me/displayName")]
+        [HttpPatch("account/me/displayName")]
         [HttpPut("api/account/me/displayName")]
         [HttpPost("api/account/me/displayName")]
+        [HttpPatch("api/account/me/displayName")]
         [HttpPut("account/me/username")]
         [HttpPost("account/me/username")]
+        [HttpPatch("account/me/username")]
         [HttpPut("api/account/me/username")]
         [HttpPost("api/account/me/username")]
+        [HttpPatch("api/account/me/username")]
+        [HttpPut("account/{routeId:int}/displayName")]
+        [HttpPost("account/{routeId:int}/displayName")]
+        [HttpPatch("account/{routeId:int}/displayName")]
+        [HttpPut("api/account/{routeId:int}/displayName")]
+        [HttpPost("api/account/{routeId:int}/displayName")]
+        [HttpPatch("api/account/{routeId:int}/displayName")]
+        [HttpPut("account/{routeId:int}/username")]
+        [HttpPost("account/{routeId:int}/username")]
+        [HttpPatch("account/{routeId:int}/username")]
+        [HttpPut("api/account/{routeId:int}/username")]
+        [HttpPost("api/account/{routeId:int}/username")]
+        [HttpPatch("api/account/{routeId:int}/username")]
         [HttpPut("account/me")]
+        [HttpPost("account/me")]
+        [HttpPatch("account/me")]
         [HttpPut("api/account/me")]
-        public async Task<IActionResult> RenameMe()
+        [HttpPost("api/account/me")]
+        [HttpPatch("api/account/me")]
+        public async Task<IActionResult> RenameMe(int routeId = 0)
         {
             int accountId = GetAccountIdFromAuth();
+            if (accountId == 0) accountId = routeId;
             if (accountId == 0) return Unauthorized(new { ErrorCode = 1, Error = "not_authenticated" });
 
             string? chosenName = null;
 
             try
             {
-                using var reader = new StreamReader(Request.Body);
-                var body = await reader.ReadToEndAsync();
+                var body = await ReadRequestBodyAsync();
                 if (!string.IsNullOrWhiteSpace(body))
                 {
                     if (body.TrimStart().StartsWith("{"))
@@ -279,6 +482,10 @@ namespace RetroRec_Server.Controllers
                                 break;
                             }
                         }
+                    }
+                    else
+                    {
+                        chosenName = body;
                     }
                 }
             }
@@ -340,12 +547,18 @@ namespace RetroRec_Server.Controllers
         // Client-side "is this username available?" probe. Avoids surfacing
         // a 409 in the rename UI by letting the client pre-check.
         [HttpGet("account/usernameAvailable")]
+        [HttpGet("account/usernameAvailable/{routeUsername}")]
         [HttpGet("api/account/usernameAvailable")]
+        [HttpGet("api/account/usernameAvailable/{routeUsername}")]
         [HttpGet("account/checkusername")]
+        [HttpGet("account/checkusername/{routeUsername}")]
         [HttpGet("api/account/checkusername")]
-        public IActionResult UsernameAvailable([FromQuery] string username)
+        [HttpGet("api/account/checkusername/{routeUsername}")]
+        public IActionResult UsernameAvailable([FromQuery] string username, string routeUsername = "")
         {
             int myId = GetAccountIdFromAuth();
+            if (string.IsNullOrWhiteSpace(username))
+                username = routeUsername;
             if (string.IsNullOrWhiteSpace(username))
                 return Pascal(new { Username = username ?? "", Available = false });
 

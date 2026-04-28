@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using System.IO;
 using System.Text;
 using System.Text.Json;
 
@@ -58,6 +59,31 @@ namespace RetroRec_Server.Controllers
                 PropertyNamingPolicy = null
             });
             return Content(json, "application/json");
+        }
+
+        // Read and rewind the request body without disposing the shared stream.
+        // Several Rec Room flows try JSON first and then fall back to form/query
+        // parsing inside the same action; using a normal StreamReader(Request.Body)
+        // closes the body stream and makes the later Request.Form access throw.
+        protected async Task<string> ReadRequestBodyAsync()
+        {
+            Request.EnableBuffering();
+            if (Request.Body.CanSeek)
+                Request.Body.Position = 0;
+
+            using var reader = new StreamReader(
+                Request.Body,
+                Encoding.UTF8,
+                detectEncodingFromByteOrderMarks: false,
+                bufferSize: 1024,
+                leaveOpen: true);
+
+            var body = await reader.ReadToEndAsync();
+
+            if (Request.Body.CanSeek)
+                Request.Body.Position = 0;
+
+            return body;
         }
     }
 

@@ -62,18 +62,11 @@ app.Use(async (context, next) =>
     {
         using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
         requestBody = await reader.ReadToEndAsync();
-        context.Request.Body.Position = 0;
+        if (context.Request.Body.CanSeek)
+            context.Request.Body.Position = 0;
     }
 
-    var originalBody = context.Response.Body;
-    using var newBody = new MemoryStream();
-    context.Response.Body = newBody;
-
     await next();
-
-    newBody.Seek(0, SeekOrigin.Begin);
-    var responseText = await new StreamReader(newBody).ReadToEndAsync();
-    newBody.Seek(0, SeekOrigin.Begin);
 
     if (context.Response.StatusCode == 404)
     {
@@ -89,13 +82,9 @@ app.Use(async (context, next) =>
     else
     {
         Console.WriteLine($"API Response: {context.Request.Method} {context.Request.Path} - {context.Response.StatusCode}");
-        if (!string.IsNullOrEmpty(responseText) && responseText.Length < 500)
-            Console.WriteLine($"Body: {responseText}");
-        else if (responseText.Length >= 500)
-            Console.WriteLine($"Body: [{responseText.Length} chars, truncated]");
+        if (!string.IsNullOrEmpty(context.Response.ContentType))
+            Console.WriteLine($"Content-Type: {context.Response.ContentType}");
     }
-
-    await newBody.CopyToAsync(originalBody);
 });
 
 app.UseExceptionHandler(errorApp =>

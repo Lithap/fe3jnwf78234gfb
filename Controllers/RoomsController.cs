@@ -384,6 +384,8 @@ namespace RetroRec_Server.Controllers
         // copying the scene/template from the base room.
         [HttpPost("/rooms/{roomId:int}/clone")]
         [HttpPost("/api/rooms/{roomId:int}/clone")]
+        [HttpPut("/rooms/{roomId:int}/clone")]
+        [HttpPut("/api/rooms/{roomId:int}/clone")]
         public async Task<IActionResult> CloneRoom(int roomId, [FromForm] string name = null, [FromQuery] string nameQ = null)
         {
             int callerId = GetAccountIdFromAuth();
@@ -403,11 +405,7 @@ namespace RetroRec_Server.Controllers
             {
                 try
                 {
-                    Request.EnableBuffering();
-                    Request.Body.Position = 0;
-                    using var reader = new StreamReader(Request.Body, leaveOpen: true);
-                    var body = await reader.ReadToEndAsync();
-                    Request.Body.Position = 0;
+                    var body = await ReadRequestBodyAsync();
                     if (!string.IsNullOrWhiteSpace(body) &&
                         (Request.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false))
                     {
@@ -537,8 +535,7 @@ namespace RetroRec_Server.Controllers
             string body;
             try
             {
-                using var reader = new StreamReader(Request.Body);
-                body = await reader.ReadToEndAsync();
+                body = await ReadRequestBodyAsync();
             }
             catch (Exception ex)
             {
@@ -746,10 +743,18 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/goto/room/{roomName}")]
         [HttpPost("/goto/room/{roomName}/{subRoomName}")]
         [HttpGet("/goto/room/{roomName}/{subRoomName}")]
+        [HttpPost("/matchmaking/v2/goto/room/{roomName}")]
+        [HttpGet("/matchmaking/v2/goto/room/{roomName}")]
+        [HttpPost("/matchmaking/v2/goto/room/{roomName}/{subRoomName}")]
+        [HttpGet("/matchmaking/v2/goto/room/{roomName}/{subRoomName}")]
         [HttpPost("/matchmaking/v1/goto/room/{roomName}")]
         [HttpGet("/matchmaking/v1/goto/room/{roomName}")]
         [HttpPost("/matchmaking/v1/goto/room/{roomName}/{subRoomName}")]
         [HttpGet("/matchmaking/v1/goto/room/{roomName}/{subRoomName}")]
+        [HttpPost("/api/matchmaking/v2/goto/room/{roomName}")]
+        [HttpGet("/api/matchmaking/v2/goto/room/{roomName}")]
+        [HttpPost("/api/matchmaking/v2/goto/room/{roomName}/{subRoomName}")]
+        [HttpGet("/api/matchmaking/v2/goto/room/{roomName}/{subRoomName}")]
         [HttpPost("/api/matchmaking/v1/goto/room/{roomName}")]
         [HttpGet("/api/matchmaking/v1/goto/room/{roomName}")]
         [HttpPost("/api/matchmaking/v1/goto/room/{roomName}/{subRoomName}")]
@@ -774,8 +779,12 @@ namespace RetroRec_Server.Controllers
 
         [HttpPost("/goto/roomId/{roomId:int}")]
         [HttpGet("/goto/roomId/{roomId:int}")]
+        [HttpPost("/matchmaking/v2/goto/roomId/{roomId:int}")]
+        [HttpGet("/matchmaking/v2/goto/roomId/{roomId:int}")]
         [HttpPost("/matchmaking/v1/goto/roomId/{roomId:int}")]
         [HttpGet("/matchmaking/v1/goto/roomId/{roomId:int}")]
+        [HttpPost("/api/matchmaking/v2/goto/roomId/{roomId:int}")]
+        [HttpGet("/api/matchmaking/v2/goto/roomId/{roomId:int}")]
         [HttpPost("/api/matchmaking/v1/goto/roomId/{roomId:int}")]
         [HttpGet("/api/matchmaking/v1/goto/roomId/{roomId:int}")]
         public IActionResult GotoRoomId(int roomId)
