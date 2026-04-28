@@ -313,11 +313,11 @@ namespace RetroRec_Server.Controllers
         // ============ REPUTATION ============
 
         [HttpGet("/api/playerReputation/v1/{id}")]
-        public IActionResult Reputation(long id) => Pascal(new
+        public IActionResult Reputation(long id)
         {
             using var db = new RetroRecDb();
-            return ReputationPayload(BuildCheerSummary(db, id));
-        });
+            return Pascal(ReputationPayload(BuildCheerSummary(db, id)));
+        }
 
         [HttpGet("/api/playerReputation/v2/bulk")]
         public IActionResult ReputationBulk([FromQuery(Name = "id")] long[] ids)
