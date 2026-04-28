@@ -237,6 +237,123 @@ namespace RetroRec_Server.Controllers
         [HttpGet("api/me")]
         public IActionResult AccountMeAlias() => AccountMe();
 
+        // ============ RENAME / DISPLAY NAME ============
+        //
+        // Dedicated rename endpoints. The watch's "Edit Profile" submenu and
+        // the in-game "Change Username" flow each post here with the new
+        // name. Same uniqueness rule as CreateAccount: rejects 409 if
+        // someone else already has the chosen name, allows your own current
+        // name as a no-op. Persisted to the Accounts table immediately.
+        [HttpPut("account/me/displayName")]
+        [HttpPost("account/me/displayName")]
+        [HttpPut("api/account/me/displayName")]
+        [HttpPost("api/account/me/displayName")]
+        [HttpPut("account/me/username")]
+        [HttpPost("account/me/username")]
+        [HttpPut("api/account/me/username")]
+        [HttpPost("api/account/me/username")]
+        [HttpPut("account/me")]
+        [HttpPut("api/account/me")]
+        public async Task<IActionResult> RenameMe()
+        {
+            int accountId = GetAccountIdFromAuth();
+            if (accountId == 0) return Unauthorized(new { ErrorCode = 1, Error = "not_authenticated" });
+
+            string? chosenName = null;
+
+            try
+            {
+                using var reader = new StreamReader(Request.Body);
+                var body = await reader.ReadToEndAsync();
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    if (body.TrimStart().StartsWith("{"))
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(body);
+                        foreach (var key in new[] { "displayName", "DisplayName", "username", "Username", "name", "Name" })
+                        {
+                            if (doc.RootElement.TryGetProperty(key, out var el) &&
+                                el.ValueKind == System.Text.Json.JsonValueKind.String)
+                            {
+                                chosenName = el.GetString();
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            if (chosenName == null && Request.HasFormContentType)
+            {
+                foreach (var key in new[] { "displayName", "username", "name" })
+                {
+                    if (Request.Form.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v))
+                    {
+                        chosenName = v.ToString();
+                        break;
+                    }
+                }
+            }
+
+            if (chosenName == null)
+            {
+                foreach (var key in new[] { "displayName", "username", "name" })
+                {
+                    if (Request.Query.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v))
+                    {
+                        chosenName = v.ToString();
+                        break;
+                    }
+                }
+            }
+
+            chosenName = chosenName?.Trim();
+            if (string.IsNullOrWhiteSpace(chosenName))
+                return BadRequest(new { ErrorCode = 1, Error = "missing_name" });
+
+            using var db = new RetroRecDb();
+            var account = db.Accounts.FirstOrDefault(a => a.Id == accountId);
+            if (account == null) return NotFound(new { ErrorCode = 1, Error = "account_not_found" });
+
+            // Self-renames to the same name are no-ops; otherwise the name
+            // must not be taken by anyone else.
+            if (!string.Equals(account.Username, chosenName, StringComparison.OrdinalIgnoreCase))
+            {
+                bool taken = db.Accounts.Any(a => a.Username == chosenName && a.Id != account.Id);
+                if (taken)
+                {
+                    return Conflict(new
+                    {
+                        ErrorCode = 2,
+                        Error = "username_taken",
+                        Message = $"The username '{chosenName}' is already taken."
+                    });
+                }
+                account.Username = chosenName;
+                db.SaveChanges();
+            }
+
+            return Pascal(BuildAccountJson(account));
+        }
+
+        // Client-side "is this username available?" probe. Avoids surfacing
+        // a 409 in the rename UI by letting the client pre-check.
+        [HttpGet("account/usernameAvailable")]
+        [HttpGet("api/account/usernameAvailable")]
+        [HttpGet("account/checkusername")]
+        [HttpGet("api/account/checkusername")]
+        public IActionResult UsernameAvailable([FromQuery] string username)
+        {
+            int myId = GetAccountIdFromAuth();
+            if (string.IsNullOrWhiteSpace(username))
+                return Pascal(new { Username = username ?? "", Available = false });
+
+            using var db = new RetroRecDb();
+            bool taken = db.Accounts.Any(a => a.Username == username && a.Id != myId);
+            return Pascal(new { Username = username, Available = !taken });
+        }
+
         // Client checks if the account has set up a password (for login on web,
         // not used in our setup since we auth purely via Steam platform ID).
         // Always return false — our private server doesn't use passwords.
