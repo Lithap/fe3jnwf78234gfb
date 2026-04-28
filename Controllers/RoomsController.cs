@@ -881,15 +881,13 @@ namespace RetroRec_Server.Controllers
 
             foreach (var kvp in PartyState.MemberOf.Where(m => m.Value == playerId))
             {
-                // Immediately update the member's room so their next heartbeat
-                // returns the leader's room instance and the client auto-follows.
-                // Important: we do NOT also synthesize an invite here — members
-                // are already in the leader's party, so re-issuing an invite
-                // every time the leader teleports causes the "X wants to go
-                // with you" notification to fire on every room change.
-                // Updating their RoomInstance is enough; the heartbeat-driven
-                // auto-follow path handles the rest.
+                // Keep the member's hidden presence aligned with the leader so
+                // follow-up heartbeats report the destination immediately, but
+                // also refresh a single outstanding "follow me" invite because
+                // some client builds only surface the room-change prompt from
+                // /api/invites/v1 and ignore the silent presence update alone.
                 UserRoomInstances[kvp.Key] = roomInstance;
+                PartyState.UpsertInvite(playerId, kvp.Key, roomName, roomId, isPartyInvite: true);
             }
 
             return Pascal(new

@@ -143,36 +143,7 @@ namespace RetroRec_Server.Controllers
             if (!string.IsNullOrWhiteSpace(roomName)) invRoomName = roomName;
             if (roomIdParsed != 0) invRoomId = roomIdParsed;
 
-            // De-dupe: if there's already an outstanding invite from me to
-            // this player for the same room, refresh its timestamp instead
-            // of stacking another notification on top of the existing one.
-            // That matches the "I keep getting the same invite popup over
-            // and over" symptom the user described.
-            var existing = PartyState.Invites
-                .FirstOrDefault(kv => kv.Value.SenderId == myId &&
-                                      kv.Value.TargetId == targetId &&
-                                      kv.Value.RoomId == invRoomId);
-            string inviteId;
-            if (!string.IsNullOrEmpty(existing.Key))
-            {
-                inviteId = existing.Key;
-                existing.Value.RoomName = invRoomName;
-                existing.Value.CreatedAt = DateTime.UtcNow;
-            }
-            else
-            {
-                inviteId = $"inv_{myId}_{targetId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
-                PartyState.Invites[inviteId] = new InviteData
-                {
-                    InviteId = inviteId,
-                    SenderId = myId,
-                    TargetId = targetId,
-                    RoomName = invRoomName,
-                    RoomId = invRoomId,
-                    IsPartyInvite = true,
-                    CreatedAt = DateTime.UtcNow
-                };
-            }
+            var inviteId = PartyState.UpsertInvite(myId, targetId, invRoomName, invRoomId, isPartyInvite: true);
 
             return Pascal(new
             {

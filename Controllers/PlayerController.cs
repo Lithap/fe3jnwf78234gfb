@@ -8,6 +8,187 @@ namespace RetroRec_Server.Controllers
     [ApiController]
     public class PlayerController : RetroRecBase
     {
+        private sealed class CheerSummary
+        {
+            public long AccountId { get; set; }
+            public bool IsCheerful { get; set; }
+            public int CheerGeneral { get; set; }
+            public int CheerHelpful { get; set; }
+            public int CheerGreatHost { get; set; }
+            public int CheerSportsman { get; set; }
+            public int CheerCreative { get; set; }
+            public int CheerCredit { get; set; }
+            public int SubscriberCount { get; set; }
+            public int SubscribedCount { get; set; }
+            public int SelectedCheer { get; set; }
+        }
+
+        private static int NormalizeCheerCategory(int cheerCategory)
+            => cheerCategory switch
+            {
+                0 => 0,
+                20 => 20,
+                30 => 30,
+                40 => 40,
+                50 => 50,
+                60 => 60,
+                _ => 20
+            };
+
+        private static int DefaultSelectedCheer(CheerSummary summary)
+        {
+            if (summary.CheerCreative > 0) return 60;
+            if (summary.CheerSportsman > 0) return 50;
+            if (summary.CheerGreatHost > 0) return 40;
+            if (summary.CheerHelpful > 0) return 30;
+            if (summary.CheerGeneral > 0) return 20;
+            return 0;
+        }
+
+        private CheerSummary BuildCheerSummary(RetroRecDb db, long accountId)
+        {
+            var cheers = db.PlayerCheers
+                .Where(c => c.TargetAccountId == accountId)
+                .ToList();
+
+            int CountCategory(int category) => cheers.Count(c => c.CheerCategory == category);
+
+            var summary = new CheerSummary
+            {
+                AccountId = accountId,
+                CheerGeneral = CountCategory(20),
+                CheerHelpful = CountCategory(30),
+                CheerGreatHost = CountCategory(40),
+                CheerSportsman = CountCategory(50),
+                CheerCreative = CountCategory(60),
+                CheerCredit = Math.Max(0, 77 - db.PlayerCheers.Count(c => c.FromAccountId == accountId)),
+                SubscriberCount = 0,
+                SubscribedCount = 0,
+                SelectedCheer = 0
+            };
+
+            summary.IsCheerful =
+                summary.CheerGeneral > 0 ||
+                summary.CheerHelpful > 0 ||
+                summary.CheerGreatHost > 0 ||
+                summary.CheerSportsman > 0 ||
+                summary.CheerCreative > 0;
+            summary.SelectedCheer = DefaultSelectedCheer(summary);
+            return summary;
+        }
+
+        private object ReputationPayload(CheerSummary summary) => new
+        {
+            summary.AccountId,
+            summary.IsCheerful,
+            Noteriety = 0,
+            summary.CheerGeneral,
+            summary.CheerHelpful,
+            summary.CheerGreatHost,
+            summary.CheerSportsman,
+            summary.CheerCreative,
+            summary.CheerCredit,
+            summary.SubscriberCount,
+            summary.SubscribedCount,
+            summary.SelectedCheer
+        };
+
+        private async Task<Dictionary<string, string>> ReadLooseBodyFields()
+        {
+            var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (Request.Query.Count > 0)
+            {
+                foreach (var pair in Request.Query)
+                    fields[pair.Key] = pair.Value.ToString();
+            }
+
+            if (Request.HasFormContentType)
+            {
+                try
+                {
+                    var form = await Request.ReadFormAsync();
+                    foreach (var pair in form)
+                        fields[pair.Key] = pair.Value.ToString();
+                }
+                catch { }
+            }
+
+            try
+            {
+                if (Request.ContentLength.GetValueOrDefault() > 0)
+                {
+                    Request.EnableBuffering();
+                    if (Request.Body.CanSeek) Request.Body.Position = 0;
+                    using var reader = new StreamReader(Request.Body, leaveOpen: true);
+                    var body = await reader.ReadToEndAsync();
+                    if (Request.Body.CanSeek) Request.Body.Position = 0;
+
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        if (Request.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false)
+                        {
+                            using var doc = System.Text.Json.JsonDocument.Parse(body);
+                            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object)
+                            {
+                                foreach (var prop in doc.RootElement.EnumerateObject())
+                                {
+                                    fields[prop.Name] = prop.Value.ValueKind switch
+                                    {
+                                        System.Text.Json.JsonValueKind.String => prop.Value.GetString() ?? "",
+                                        System.Text.Json.JsonValueKind.Number => prop.Value.GetRawText(),
+                                        System.Text.Json.JsonValueKind.True => "true",
+                                        System.Text.Json.JsonValueKind.False => "false",
+                                        _ => prop.Value.GetRawText()
+                                    };
+                                }
+                            }
+                        }
+                        else if (body.Contains('='))
+                        {
+                            foreach (var pair in body.Split('&', StringSplitOptions.RemoveEmptyEntries))
+                            {
+                                var parts = pair.Split('=', 2);
+                                var key = Uri.UnescapeDataString(parts[0]);
+                                var value = parts.Length > 1 ? Uri.UnescapeDataString(parts[1]) : "";
+                                if (!string.IsNullOrWhiteSpace(key))
+                                    fields[key] = value;
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            return fields;
+        }
+
+        private static bool ReadBoolField(Dictionary<string, string> fields, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (!fields.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw))
+                    continue;
+                if (bool.TryParse(raw, out var parsed))
+                    return parsed;
+                if (raw == "1") return true;
+                if (raw == "0") return false;
+            }
+
+            return false;
+        }
+
+        private static int ReadIntField(Dictionary<string, string> fields, params string[] keys)
+        {
+            foreach (var key in keys)
+            {
+                if (fields.TryGetValue(key, out var raw) && int.TryParse(raw, out var parsed))
+                    return parsed;
+            }
+
+            return 0;
+        }
+
         // ============ PRESENCE / SESSION ============
 
         [HttpGet("/player")]
@@ -134,18 +315,8 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/api/playerReputation/v1/{id}")]
         public IActionResult Reputation(long id) => Pascal(new
         {
-            AccountId = id,
-            IsCheerful = false,
-            Noteriety = 0,
-            CheerGeneral = 1,
-            CheerHelpful = 1,
-            CheerGreatHost = 1,
-            CheerSportsman = 1,
-            CheerCreative = 1,
-            CheerCredit = 77,
-            SubscriberCount = 2,
-            SubscribedCount = 0,
-            SelectedCheer = 40
+            using var db = new RetroRecDb();
+            return ReputationPayload(BuildCheerSummary(db, id));
         });
 
         [HttpGet("/api/playerReputation/v2/bulk")]
@@ -154,24 +325,9 @@ namespace RetroRec_Server.Controllers
             var results = new List<object>();
             if (ids != null)
             {
+                using var db = new RetroRecDb();
                 foreach (var id in ids)
-                {
-                    results.Add(new
-                    {
-                        AccountId = id,
-                        IsCheerful = false,
-                        Noteriety = 0,
-                        CheerGeneral = 1,
-                        CheerHelpful = 1,
-                        CheerGreatHost = 1,
-                        CheerSportsman = 1,
-                        CheerCreative = 1,
-                        CheerCredit = 77,
-                        SubscriberCount = 2,
-                        SubscribedCount = 0,
-                        SelectedCheer = 40
-                    });
-                }
+                    results.Add(ReputationPayload(BuildCheerSummary(db, id)));
             }
             return Pascal(results);
         }
@@ -181,20 +337,72 @@ namespace RetroRec_Server.Controllers
         public IActionResult Cheer(long targetId = 0, [FromQuery] long id = 0)
         {
             long cheerTarget = targetId > 0 ? targetId : id;
+            using var db = new RetroRecDb();
+            var summary = BuildCheerSummary(db, cheerTarget);
+            if (summary.CheerGeneral == 0)
+            {
+                summary.CheerGeneral = 1;
+                summary.IsCheerful = true;
+                summary.SelectedCheer = 20;
+            }
+            return Pascal(ReputationPayload(summary));
+        }
+
+        [HttpPost("/api/PlayerCheer/v1/create")]
+        [HttpPost("/PlayerCheer/v1/create")]
+        [HttpPost("/api/playercheer/v1/create")]
+        [HttpPost("/playercheer/v1/create")]
+        public async Task<IActionResult> CreatePlayerCheer()
+        {
+            int myId = GetAccountIdFromAuth();
+            if (myId == 0) myId = 2;
+
+            var fields = await ReadLooseBodyFields();
+            var targetId = ReadIntField(fields, "PlayerIdTo", "playerIdTo", "TargetPlayerId", "targetPlayerId", "AccountId", "accountId", "id");
+            var roomId = ReadIntField(fields, "RoomId", "roomId");
+            var cheerCategory = NormalizeCheerCategory(ReadIntField(fields, "CheerCategory", "cheerCategory", "SelectedCheer", "selectedCheer"));
+            var anonymous = ReadBoolField(fields, "Anonymous", "anonymous", "IsAnonymous", "isAnonymous");
+
+            if (targetId == 0 || targetId == myId)
+                return Pascal(new { ErrorCode = 1, PlayerIdFrom = myId, PlayerIdTo = targetId, CheerCategory = cheerCategory });
+
+            using var db = new RetroRecDb();
+            var existing = db.PlayerCheers.FirstOrDefault(c =>
+                c.FromAccountId == myId &&
+                c.TargetAccountId == targetId &&
+                c.CheerCategory == cheerCategory);
+
+            if (existing == null)
+            {
+                db.PlayerCheers.Add(new PlayerCheer
+                {
+                    FromAccountId = myId,
+                    TargetAccountId = targetId,
+                    CheerCategory = cheerCategory,
+                    RoomId = roomId,
+                    Anonymous = anonymous,
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+            else
+            {
+                existing.RoomId = roomId;
+                existing.Anonymous = anonymous;
+                existing.CreatedAt = DateTime.UtcNow;
+            }
+
+            db.SaveChanges();
+
+            var summary = BuildCheerSummary(db, targetId);
             return Pascal(new
             {
-                AccountId = cheerTarget,
-                IsCheerful = true,
-                Noteriety = 0,
-                CheerGeneral = 2,
-                CheerHelpful = 1,
-                CheerGreatHost = 1,
-                CheerSportsman = 1,
-                CheerCreative = 1,
-                CheerCredit = 77,
-                SubscriberCount = 2,
-                SubscribedCount = 0,
-                SelectedCheer = 40
+                ErrorCode = 0,
+                PlayerIdFrom = myId,
+                PlayerIdTo = targetId,
+                CheerCategory = cheerCategory,
+                RoomId = roomId,
+                Anonymous = anonymous,
+                Reputation = ReputationPayload(summary)
             });
         }
 

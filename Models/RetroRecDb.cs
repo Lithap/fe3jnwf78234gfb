@@ -7,6 +7,7 @@ public class RetroRecDb : DbContext
     public DbSet<UserRoom> UserRooms { get; set; }
     public DbSet<PlayerBio> Bios { get; set; }
     public DbSet<FriendRelationship> FriendRelationships { get; set; }
+    public DbSet<PlayerCheer> PlayerCheers { get; set; }
 
     protected override void OnConfiguring(DbContextOptionsBuilder options)
     {
