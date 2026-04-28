@@ -246,8 +246,11 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/account/{id}/bio")]
         public async Task<IActionResult> SetBio(long id)
         {
-            using var reader = new System.IO.StreamReader(Request.Body);
+            Request.EnableBuffering();
+            if (Request.Body.CanSeek) Request.Body.Position = 0;
+            using var reader = new System.IO.StreamReader(Request.Body, leaveOpen: true);
             var body = await reader.ReadToEndAsync();
+            if (Request.Body.CanSeek) Request.Body.Position = 0;
             string? bio = null;
 
             try
@@ -320,6 +323,10 @@ namespace RetroRec_Server.Controllers
 
         [HttpPut("/account/me/bio")]
         [HttpPut("/api/account/me/bio")]
+        [HttpPost("/account/me/bio")]
+        [HttpPost("/api/account/me/bio")]
+        [HttpPatch("/account/me/bio")]
+        [HttpPatch("/api/account/me/bio")]
         public async Task<IActionResult> SetMyBio()
         {
             int myId = GetAccountIdFromAuth();
@@ -381,6 +388,8 @@ namespace RetroRec_Server.Controllers
         //   type 4 = Both sent requests = mutual friends
         [HttpGet("/api/relationships/v2/get")]
         [HttpGet("/relationships/v2/get")]
+        [HttpGet("/api/relationships/v1/get")]
+        [HttpGet("/relationships/v1/get")]
         public IActionResult RelationshipsV2Get()
         {
             int myId = GetAccountIdFromAuth();
@@ -496,10 +505,18 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/relationships/v2/addfriend")]
         [HttpGet("/relationships/v2/addfriend")]
         [HttpPost("/relationships/v2/addfriend")]
+        [HttpGet("/api/relationships/v1/addfriend")]
+        [HttpPost("/api/relationships/v1/addfriend")]
+        [HttpGet("/relationships/v1/addfriend")]
+        [HttpPost("/relationships/v1/addfriend")]
         [HttpGet("/api/relationships/v2/sendfriendrequest")]
         [HttpPost("/api/relationships/v2/sendfriendrequest")]
         [HttpGet("/relationships/v2/sendfriendrequest")]
         [HttpPost("/relationships/v2/sendfriendrequest")]
+        [HttpGet("/api/relationships/v1/sendfriendrequest")]
+        [HttpPost("/api/relationships/v1/sendfriendrequest")]
+        [HttpGet("/relationships/v1/sendfriendrequest")]
+        [HttpPost("/relationships/v1/sendfriendrequest")]
         // Path-style variants — client sometimes posts the id as the last
         // path segment (e.g. POST /api/relationships/v2/addfriend/1234).
         [HttpGet("/api/relationships/v2/addfriend/{routeId:int}")]
@@ -572,6 +589,10 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/relationships/v2/removefriend")]
         [HttpGet("/relationships/v2/removefriend")]
         [HttpPost("/relationships/v2/removefriend")]
+        [HttpGet("/api/relationships/v1/removefriend")]
+        [HttpPost("/api/relationships/v1/removefriend")]
+        [HttpGet("/relationships/v1/removefriend")]
+        [HttpPost("/relationships/v1/removefriend")]
         [HttpGet("/api/relationships/v2/removefriend/{routeId:int}")]
         [HttpPost("/api/relationships/v2/removefriend/{routeId:int}")]
         [HttpGet("/relationships/v2/removefriend/{routeId:int}")]
@@ -581,8 +602,12 @@ namespace RetroRec_Server.Controllers
         // "Decline incoming request" is just a remove on the inbound side.
         [HttpPost("/api/relationships/v2/declinefriendrequest")]
         [HttpPost("/relationships/v2/declinefriendrequest")]
+        [HttpPost("/api/relationships/v1/declinefriendrequest")]
+        [HttpPost("/relationships/v1/declinefriendrequest")]
         [HttpPost("/api/relationships/v2/declinefriendrequest/{routeId:int}")]
         [HttpPost("/relationships/v2/declinefriendrequest/{routeId:int}")]
+        [HttpPost("/api/relationships/v1/declinefriendrequest/{routeId:int}")]
+        [HttpPost("/relationships/v1/declinefriendrequest/{routeId:int}")]
         public IActionResult RemoveFriend(
             int routeId = 0,
             [FromQuery] int id = 0,
