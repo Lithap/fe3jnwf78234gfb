@@ -217,30 +217,96 @@ namespace RetroRec_Server.Controllers
 
         // ============ BIO ============
 
+        // Reads the bio from the persistent Bios table (replaces the old
+        // in-memory PartyState.Bios dictionary). Falls back to in-memory
+        // for accounts that wrote a bio before the DB-backed migration so
+        // nothing is lost during the rollover. Once any bio is set in the
+        // new code path it goes straight to disk.
         [HttpGet("/account/{id}/bio")]
         [HttpGet("/api/account/{id}/bio")]
         public IActionResult GetBio(long id)
         {
+            using var db = new RetroRecDb();
+            var row = db.Bios.FirstOrDefault(b => b.AccountId == id);
+            if (row != null) return Pascal(new { AccountId = id, Bio = row.Bio ?? "" });
+
             PartyState.Bios.TryGetValue(id, out var bio);
             return Pascal(new { AccountId = id, Bio = bio ?? "" });
         }
 
+        // SetBio reads either {"bio":"..."} JSON OR a form field named bio
+        // OR a raw-string body (depending on which menu issued the save)
+        // and upserts a single Bios row keyed by AccountId. SaveChanges is
+        // wrapped in try/catch so a transient DB error doesn't 500-out the
+        // whole bio screen — the in-memory copy is updated either way so
+        // the user sees their change immediately.
         [HttpPut("/account/{id}/bio")]
         [HttpPut("/api/account/{id}/bio")]
+        [HttpPost("/account/{id}/bio")]
+        [HttpPost("/api/account/{id}/bio")]
         public async Task<IActionResult> SetBio(long id)
         {
             using var reader = new System.IO.StreamReader(Request.Body);
             var body = await reader.ReadToEndAsync();
             string? bio = null;
+
             try
             {
-                var doc = System.Text.Json.JsonDocument.Parse(body);
-                if (doc.RootElement.TryGetProperty("bio", out var bioEl))
-                    bio = bioEl.GetString();
+                if (!string.IsNullOrWhiteSpace(body) &&
+                    (body.TrimStart().StartsWith("{") || body.TrimStart().StartsWith("[")))
+                {
+                    var doc = System.Text.Json.JsonDocument.Parse(body);
+                    foreach (var key in new[] { "bio", "Bio" })
+                    {
+                        if (doc.RootElement.TryGetProperty(key, out var bioEl) &&
+                            bioEl.ValueKind == System.Text.Json.JsonValueKind.String)
+                        {
+                            bio = bioEl.GetString();
+                            break;
+                        }
+                    }
+                }
             }
             catch { }
-            PartyState.Bios[(long)id] = bio ?? "";
-            return Pascal(new { AccountId = id, Bio = bio ?? "" });
+
+            if (bio == null && Request.HasFormContentType &&
+                Request.Form.TryGetValue("bio", out var formBio))
+                bio = formBio.ToString();
+
+            if (bio == null && !string.IsNullOrEmpty(body) &&
+                !body.TrimStart().StartsWith("{") && !body.TrimStart().StartsWith("["))
+                bio = body;
+
+            bio ??= "";
+
+            PartyState.Bios[id] = bio;
+
+            try
+            {
+                using var db = new RetroRecDb();
+                var row = db.Bios.FirstOrDefault(b => b.AccountId == id);
+                if (row == null)
+                {
+                    db.Bios.Add(new PlayerBio
+                    {
+                        AccountId = id,
+                        Bio = bio,
+                        UpdatedAt = DateTime.UtcNow
+                    });
+                }
+                else
+                {
+                    row.Bio = bio;
+                    row.UpdatedAt = DateTime.UtcNow;
+                }
+                db.SaveChanges();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[bio] persist failed for account {id}: {ex.Message}");
+            }
+
+            return Pascal(new { AccountId = id, Bio = bio });
         }
 
         [HttpGet("/account/me/bio")]
@@ -320,17 +386,34 @@ namespace RetroRec_Server.Controllers
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
 
-            var results = new List<object>();
+            using var db = new RetroRecDb();
+            // Pull every relationship this user is a party to from the DB so
+            // friendships survive server restarts. Old in-memory rows from
+            // PartyState.FriendRequests are merged in for backward compat
+            // during the rollover (they migrate to disk as soon as the user
+            // re-adds the friend or the partner sends a return request).
+            var dbRows = db.FriendRelationships
+                .Where(r => r.SenderId == myId || r.TargetId == myId)
+                .ToList();
+
+            var pairs = new HashSet<(int sender, int target)>();
+            foreach (var r in dbRows) pairs.Add((r.SenderId, r.TargetId));
+
             foreach (var key in PartyState.FriendRequests.Keys)
             {
                 var parts = key.Split('_');
                 if (parts.Length != 2) continue;
                 if (!int.TryParse(parts[0], out var sender) || !int.TryParse(parts[1], out var target)) continue;
                 if (sender != myId && target != myId) continue;
+                pairs.Add((sender, target));
+            }
 
+            var results = new List<object>();
+            foreach (var (sender, target) in pairs)
+            {
                 bool iSent = sender == myId;
                 int otherId = iSent ? target : sender;
-                bool theyAlsoSent = PartyState.FriendRequests.ContainsKey($"{otherId}_{myId}");
+                bool theyAlsoSent = pairs.Contains((otherId, myId));
 
                 if (!iSent && theyAlsoSent) continue;
 
@@ -446,8 +529,36 @@ namespace RetroRec_Server.Controllers
             if (friendId == 0 || friendId == myId)
                 return Pascal(new { ErrorCode = 0, SubjectAccountId = myId, ObjectAccountId = friendId, Type = 0 });
 
+            // Always update the in-memory cache so reads later in the same
+            // session see the change immediately, and persist to the DB so
+            // the friendship survives a restart.
             PartyState.FriendRequests.TryAdd($"{myId}_{friendId}", true);
-            bool mutual = PartyState.FriendRequests.ContainsKey($"{friendId}_{myId}");
+
+            bool mutual;
+            try
+            {
+                using var db = new RetroRecDb();
+                bool alreadyHave = db.FriendRelationships
+                    .Any(r => r.SenderId == myId && r.TargetId == friendId);
+                if (!alreadyHave)
+                {
+                    db.FriendRelationships.Add(new FriendRelationship
+                    {
+                        SenderId = myId,
+                        TargetId = friendId,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                    db.SaveChanges();
+                }
+                mutual = db.FriendRelationships
+                    .Any(r => r.SenderId == friendId && r.TargetId == myId);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[friends] persist failed: {ex.Message}");
+                mutual = PartyState.FriendRequests.ContainsKey($"{friendId}_{myId}");
+            }
+
             return Pascal(new
             {
                 ErrorCode = 0,
@@ -487,6 +598,26 @@ namespace RetroRec_Server.Controllers
 
             PartyState.FriendRequests.TryRemove($"{myId}_{friendId}", out _);
             PartyState.FriendRequests.TryRemove($"{friendId}_{myId}", out _);
+
+            try
+            {
+                using var db = new RetroRecDb();
+                var rows = db.FriendRelationships
+                    .Where(r =>
+                        (r.SenderId == myId && r.TargetId == friendId) ||
+                        (r.SenderId == friendId && r.TargetId == myId))
+                    .ToList();
+                if (rows.Count > 0)
+                {
+                    db.FriendRelationships.RemoveRange(rows);
+                    db.SaveChanges();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[friends] remove persist failed: {ex.Message}");
+            }
+
             return Ok(new { ErrorCode = 0 });
         }
 
