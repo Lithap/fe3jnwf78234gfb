@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
 namespace RetroRec_Server.Controllers
@@ -15,11 +16,17 @@ namespace RetroRec_Server.Controllers
         //   - PhotonConfig.CloudRegion = "us"       -> picks the right region
         //   - MatchmakingParams                     -> client matchmaking init
         //   - DailyObjectives                       -> watch -> challenges UI
-        // CdnBaseUri/MessageOfTheDay are nice-to-have, not load-bearing.
-        private const string ConfigV2Json = @"{
+        // CdnBaseUri / ShareBaseUrl must match the hostname the client actually
+        // uses (from name server + forwarded headers). Hardcoding an old ngrok
+        // URL breaks images, shares, and anything that builds absolute URLs.
+        private static string BuildConfigV2Json(HttpRequest request)
+        {
+            var baseWithSlash = PublicUrlHelper.GetPublicBaseUrlWithTrailingSlash(request);
+            var baseNoSlash = baseWithSlash.TrimEnd('/');
+            return $@"{{
   ""MessageOfTheDay"": ""Welcome to RetroRec! Be excellent to each other!"",
-  ""CdnBaseUri"": ""https://overthrow-synergy-overhung.ngrok-free.dev/"",
-  ""ShareBaseUrl"": ""https://overthrow-synergy-overhung.ngrok-free.dev/{0}"",
+  ""CdnBaseUri"": ""{baseWithSlash.Replace("\"", "\\\"")}"",
+  ""ShareBaseUrl"": ""{baseNoSlash.Replace("\"", "\\\"")}/{{0}}"",
   ""LevelProgressionMaps"": [],
   ""MatchmakingParams"": {
     ""PreferFullRoomsFrequency"": 1,
@@ -53,10 +60,11 @@ namespace RetroRec_Server.Controllers
     ""MicSpamSamplePercentageForForceMuteToEnd"": 0,
     ""MicSpamWarningStateVolumeMultiplier"": 0
   }
-}";
+}}";
+        }
 
         [HttpGet("/api/config/v2")]
-        public IActionResult ConfigV2() => Content(ConfigV2Json, "application/json");
+        public IActionResult ConfigV2() => Content(BuildConfigV2Json(Request), "application/json");
 
         // GameConfigs are individual key/value pairs read by various subsystems
         // at runtime. Each missing config the client looks up triggers an
@@ -81,6 +89,7 @@ namespace RetroRec_Server.Controllers
             new { Key = "Door.Sports.Query", Value = "#sport", StartTime = (string)null, EndTime = (string)null },
             new { Key = "Door.Sports.Title", Value = "SPORTS & REC", StartTime = (string)null, EndTime = (string)null },
             new { Key = "UGC.Persistence.AutosaveIntervalSeconds", Value = "60", StartTime = (string)null, EndTime = (string)null },
+            new { Key = "UGC.RoomSavingEnabled", Value = "1", StartTime = (string)null, EndTime = (string)null },
             new { Key = "UGC.MaxChipsVisible", Value = "5000", StartTime = (string)null, EndTime = (string)null },
             new { Key = "Rewards.UseRewardSelection", Value = "0", StartTime = (string)null, EndTime = (string)null },
             new { Key = "ClickOnName.MaxRaycastDistance", Value = "5", StartTime = (string)null, EndTime = (string)null }
