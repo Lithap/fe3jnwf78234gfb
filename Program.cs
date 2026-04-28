@@ -48,6 +48,23 @@ using (var scope = app.Services.CreateScope())
     db.Database.ExecuteSqlRaw(@"
         CREATE INDEX IF NOT EXISTS ""IX_FriendRelationships_SenderId_TargetId""
             ON ""FriendRelationships"" (""SenderId"", ""TargetId"");");
+
+    db.Database.ExecuteSqlRaw(@"
+        CREATE TABLE IF NOT EXISTS ""PlayerCheers"" (
+            ""Id"" INTEGER NOT NULL CONSTRAINT ""PK_PlayerCheers"" PRIMARY KEY AUTOINCREMENT,
+            ""FromAccountId"" INTEGER NOT NULL,
+            ""TargetAccountId"" INTEGER NOT NULL,
+            ""CheerCategory"" INTEGER NOT NULL,
+            ""RoomId"" INTEGER NOT NULL,
+            ""Anonymous"" INTEGER NOT NULL,
+            ""CreatedAt"" TEXT NOT NULL
+        );");
+    db.Database.ExecuteSqlRaw(@"
+        CREATE UNIQUE INDEX IF NOT EXISTS ""IX_PlayerCheers_FromAccountId_TargetAccountId_CheerCategory""
+            ON ""PlayerCheers"" (""FromAccountId"", ""TargetAccountId"", ""CheerCategory"");");
+    db.Database.ExecuteSqlRaw(@"
+        CREATE INDEX IF NOT EXISTS ""IX_PlayerCheers_TargetAccountId""
+            ON ""PlayerCheers"" (""TargetAccountId"");");
 }
 
 app.UseExceptionHandler(errorApp =>

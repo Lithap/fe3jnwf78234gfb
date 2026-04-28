@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 
 namespace RetroRec_Server.Controllers
 {
@@ -25,5 +26,39 @@ namespace RetroRec_Server.Controllers
 
         // key = inviteId
         public static readonly ConcurrentDictionary<string, InviteData> Invites = new();
+
+        // Reuse an outstanding invite between the same two players instead of
+        // stacking stale follow prompts for each room hop. The newest room info
+        // always wins, which matches how the client expects "follow me" invites
+        // to behave when a party leader keeps moving.
+        public static string UpsertInvite(int senderId, int targetId, string? roomName, int roomId, bool isPartyInvite)
+        {
+            var existing = Invites.FirstOrDefault(kv =>
+                kv.Value.SenderId == senderId &&
+                kv.Value.TargetId == targetId &&
+                kv.Value.IsPartyInvite == isPartyInvite);
+
+            var now = DateTime.UtcNow;
+            if (!string.IsNullOrEmpty(existing.Key))
+            {
+                existing.Value.RoomName = roomName;
+                existing.Value.RoomId = roomId;
+                existing.Value.CreatedAt = now;
+                return existing.Key;
+            }
+
+            var inviteId = $"inv_{senderId}_{targetId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+            Invites[inviteId] = new InviteData
+            {
+                InviteId = inviteId,
+                SenderId = senderId,
+                TargetId = targetId,
+                RoomName = roomName,
+                RoomId = roomId,
+                IsPartyInvite = isPartyInvite,
+                CreatedAt = now
+            };
+            return inviteId;
+        }
     }
 }
