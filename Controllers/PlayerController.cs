@@ -198,6 +198,184 @@ namespace RetroRec_Server.Controllers
             });
         }
 
+        // Resolves PlayerCheer payload fields from form/query/json. The cheer
+        // button posts as x-www-form-urlencoded in some builds, while others
+        // send query params or JSON when the watch menu path changes.
+        private (int playerIdTo, int cheerCategory, int roomId, bool anonymous) ResolvePlayerCheerFromRequest(
+            Dictionary<string, string>? form,
+            int qPlayerIdTo,
+            int qCheerCategory,
+            int qRoomId,
+            bool? qAnonymous)
+        {
+            string? playerIdToStr = null;
+            string? cheerCategoryStr = null;
+            string? roomIdStr = null;
+            string? anonymousStr = null;
+
+            if (form != null)
+            {
+                form.TryGetValue("PlayerIdTo", out playerIdToStr);
+                if (string.IsNullOrEmpty(playerIdToStr)) form.TryGetValue("playerIdTo", out playerIdToStr);
+                if (string.IsNullOrEmpty(playerIdToStr)) form.TryGetValue("targetId", out playerIdToStr);
+
+                form.TryGetValue("CheerCategory", out cheerCategoryStr);
+                if (string.IsNullOrEmpty(cheerCategoryStr)) form.TryGetValue("cheerCategory", out cheerCategoryStr);
+
+                form.TryGetValue("RoomId", out roomIdStr);
+                if (string.IsNullOrEmpty(roomIdStr)) form.TryGetValue("roomId", out roomIdStr);
+
+                form.TryGetValue("Anonymous", out anonymousStr);
+                if (string.IsNullOrEmpty(anonymousStr)) form.TryGetValue("anonymous", out anonymousStr);
+            }
+
+            if (string.IsNullOrEmpty(playerIdToStr))
+            {
+                if (qPlayerIdTo != 0) playerIdToStr = qPlayerIdTo.ToString();
+                else if (Request.Query.TryGetValue("PlayerIdTo", out var qp)) playerIdToStr = qp.ToString();
+                else if (Request.Query.TryGetValue("playerIdTo", out qp)) playerIdToStr = qp.ToString();
+                else if (Request.Query.TryGetValue("targetId", out qp)) playerIdToStr = qp.ToString();
+            }
+
+            if (string.IsNullOrEmpty(cheerCategoryStr))
+            {
+                if (qCheerCategory != 0) cheerCategoryStr = qCheerCategory.ToString();
+                else if (Request.Query.TryGetValue("CheerCategory", out var qc)) cheerCategoryStr = qc.ToString();
+                else if (Request.Query.TryGetValue("cheerCategory", out qc)) cheerCategoryStr = qc.ToString();
+            }
+
+            if (string.IsNullOrEmpty(roomIdStr))
+            {
+                if (qRoomId != 0) roomIdStr = qRoomId.ToString();
+                else if (Request.Query.TryGetValue("RoomId", out var qr)) roomIdStr = qr.ToString();
+                else if (Request.Query.TryGetValue("roomId", out qr)) roomIdStr = qr.ToString();
+            }
+
+            if (string.IsNullOrEmpty(anonymousStr))
+            {
+                if (qAnonymous.HasValue) anonymousStr = qAnonymous.Value.ToString();
+                else if (Request.Query.TryGetValue("Anonymous", out var qa)) anonymousStr = qa.ToString();
+                else if (Request.Query.TryGetValue("anonymous", out qa)) anonymousStr = qa.ToString();
+            }
+
+            if ((string.IsNullOrEmpty(playerIdToStr) || string.IsNullOrEmpty(cheerCategoryStr)) &&
+                (Request.ContentType?.Contains("json", StringComparison.OrdinalIgnoreCase) ?? false))
+            {
+                try
+                {
+                    Request.EnableBuffering();
+                    Request.Body.Position = 0;
+                    using var reader = new StreamReader(Request.Body, leaveOpen: true);
+                    var body = reader.ReadToEnd();
+                    Request.Body.Position = 0;
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        using var doc = System.Text.Json.JsonDocument.Parse(body);
+                        foreach (var key in new[] { "PlayerIdTo", "playerIdTo", "TargetId", "targetId" })
+                        {
+                            if (string.IsNullOrEmpty(playerIdToStr) && doc.RootElement.TryGetProperty(key, out var el))
+                            {
+                                playerIdToStr = el.ValueKind == System.Text.Json.JsonValueKind.Number
+                                    ? el.GetRawText()
+                                    : el.GetString();
+                            }
+                        }
+
+                        foreach (var key in new[] { "CheerCategory", "cheerCategory" })
+                        {
+                            if (string.IsNullOrEmpty(cheerCategoryStr) && doc.RootElement.TryGetProperty(key, out var el))
+                            {
+                                cheerCategoryStr = el.ValueKind == System.Text.Json.JsonValueKind.Number
+                                    ? el.GetRawText()
+                                    : el.GetString();
+                            }
+                        }
+
+                        foreach (var key in new[] { "RoomId", "roomId" })
+                        {
+                            if (string.IsNullOrEmpty(roomIdStr) && doc.RootElement.TryGetProperty(key, out var el))
+                            {
+                                roomIdStr = el.ValueKind == System.Text.Json.JsonValueKind.Number
+                                    ? el.GetRawText()
+                                    : el.GetString();
+                            }
+                        }
+
+                        foreach (var key in new[] { "Anonymous", "anonymous" })
+                        {
+                            if (string.IsNullOrEmpty(anonymousStr) && doc.RootElement.TryGetProperty(key, out var el))
+                            {
+                                anonymousStr = el.ValueKind == System.Text.Json.JsonValueKind.True ||
+                                               el.ValueKind == System.Text.Json.JsonValueKind.False
+                                    ? el.GetBoolean().ToString()
+                                    : el.GetString();
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            int.TryParse(playerIdToStr, out var playerIdTo);
+            int.TryParse(cheerCategoryStr, out var cheerCategory);
+            int.TryParse(roomIdStr, out var roomId);
+            bool anonymous = false;
+            if (!string.IsNullOrEmpty(anonymousStr))
+            {
+                if (!bool.TryParse(anonymousStr, out anonymous) &&
+                    int.TryParse(anonymousStr, out var anonNum))
+                    anonymous = anonNum != 0;
+            }
+
+            return (playerIdTo, cheerCategory, roomId, anonymous);
+        }
+
+        [HttpPost("/api/PlayerCheer/v1/create")]
+        [HttpPost("/PlayerCheer/v1/create")]
+        public IActionResult CreatePlayerCheer(
+            [FromForm] Dictionary<string, string>? form = null,
+            [FromQuery] int playerIdTo = 0,
+            [FromQuery] int cheerCategory = 0,
+            [FromQuery] int roomId = 0,
+            [FromQuery] bool? anonymous = null)
+        {
+            int playerIdFrom = GetAccountIdFromAuth();
+            if (playerIdFrom == 0) playerIdFrom = 2;
+
+            var (resolvedPlayerIdTo, resolvedCheerCategory, resolvedRoomId, resolvedAnonymous) =
+                ResolvePlayerCheerFromRequest(form, playerIdTo, cheerCategory, roomId, anonymous);
+
+            if (resolvedPlayerIdTo == 0)
+                return Pascal(new { ErrorCode = 1, Error = "missing_player_id_to" });
+
+            if (resolvedRoomId == 0)
+            {
+                if (UserRoomInstances.TryGetValue(playerIdFrom, out var myRoomObj))
+                {
+                    try
+                    {
+                        dynamic room = myRoomObj;
+                        resolvedRoomId = (int)room.RoomId;
+                    }
+                    catch { }
+                }
+                if (resolvedRoomId == 0) resolvedRoomId = 1;
+            }
+
+            if (resolvedCheerCategory == 0) resolvedCheerCategory = 20;
+
+            return Pascal(new
+            {
+                ErrorCode = 0,
+                PlayerIdFrom = playerIdFrom,
+                PlayerIdTo = resolvedPlayerIdTo,
+                CheerCategory = resolvedCheerCategory,
+                RoomId = resolvedRoomId,
+                Anonymous = resolvedAnonymous,
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
         // ============ REPORTING ============
 
         [HttpGet("/api/PlayerReporting/v1/moderationBlockDetails")]
