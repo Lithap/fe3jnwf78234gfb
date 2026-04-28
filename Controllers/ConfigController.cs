@@ -1,5 +1,5 @@
-using System;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -22,57 +22,72 @@ namespace RetroRec_Server.Controllers
         // uses (from name server + forwarded headers). Hardcoding an old ngrok
         // URL breaks images, shares, and anything that builds absolute URLs.
         //
-        // Do NOT use $"..." or $@"..." for the JSON body: every `{` in the JSON
-        // would be parsed as an interpolation hole and break the build.
-        private static readonly string ConfigV2JsonTemplate = @"
-{
-  ""MessageOfTheDay"": ""Welcome to RetroRec! Be excellent to each other!"",
-  ""CdnBaseUri"": __CDN_URI__,
-  ""ShareBaseUrl"": __SHARE_BASE__,
-  ""LevelProgressionMaps"": [],
-  ""MatchmakingParams"": {
-    ""PreferFullRoomsFrequency"": 1,
-    ""PreferEmptyRoomsFrequency"": 0
-  },
-  ""DailyObjectives"": [
-    [ { ""type"": 21, ""score"": 1, ""xp"": 0 }, { ""type"": 802, ""score"": 3, ""xp"": 0 }, { ""type"": 100, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 502, ""score"": 5, ""xp"": 0 }, { ""type"": 400, ""score"": 3, ""xp"": 0 }, { ""type"": 101, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 301, ""score"": 3, ""xp"": 0 }, { ""type"": 202, ""score"": 4, ""xp"": 0 }, { ""type"": 603, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 21, ""score"": 1, ""xp"": 0 }, { ""type"": 802, ""score"": 3, ""xp"": 0 }, { ""type"": 100, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 502, ""score"": 5, ""xp"": 0 }, { ""type"": 400, ""score"": 3, ""xp"": 0 }, { ""type"": 101, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 301, ""score"": 3, ""xp"": 0 }, { ""type"": 202, ""score"": 4, ""xp"": 0 }, { ""type"": 603, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 302, ""score"": 3, ""xp"": 0 }, { ""type"": 401, ""score"": 2, ""xp"": 0 }, { ""type"": 800, ""score"": 1, ""xp"": 0 } ]
-  ],
-  ""ConfigTable"": [
-    { ""Key"": ""Gift.DropChance"", ""Value"": ""0.5"" },
-    { ""Key"": ""Gift.XP"", ""Value"": ""0.5"" }
-  ],
-  ""PhotonConfig"": {
-    ""CloudRegion"": ""us"",
-    ""CrcCheckEnabled"": false,
-    ""EnableServerTracingAfterDisconnect"": false
-  },
-  ""AutoMicMutingConfig"": {
-    ""MicSpamVolumeThreshold"": 0,
-    ""MicVolumeSampleInterval"": 0,
-    ""MicVolumeSampleRollingWindowLength"": 0,
-    ""MicSpamSamplePercentageForWarning"": 0,
-    ""MicSpamSamplePercentageForWarningToEnd"": 0,
-    ""MicSpamSamplePercentageForForceMute"": 0,
-    ""MicSpamSamplePercentageForForceMuteToEnd"": 0,
-    ""MicSpamWarningStateVolumeMultiplier"": 0
-  }
-}
-";
+        // Build JSON with JsonNode — never a giant interpolated string: `$@"..."`
+        // treats `{` as interpolation and breaks the compiler (CS8076 / CS8361).
+        private static readonly JsonSerializerOptions ConfigV2SerializeOptions = new()
+        {
+            PropertyNamingPolicy = null
+        };
+
+        private static JsonObject ObjectiveCell(int type, int score, int xp) =>
+            new()
+            {
+                ["type"] = type,
+                ["score"] = score,
+                ["xp"] = xp
+            };
 
         private static string BuildConfigV2Json(HttpRequest request)
         {
             var cdnUri = PublicUrlHelper.GetPublicBaseUrlWithTrailingSlash(request);
             var shareUri = PublicUrlHelper.GetPublicBaseUrl(request).TrimEnd('/') + "/{0}";
-            return ConfigV2JsonTemplate
-                .Trim()
-                .Replace("__CDN_URI__", JsonSerializer.Serialize(cdnUri))
-                .Replace("__SHARE_BASE__", JsonSerializer.Serialize(shareUri));
+
+            var dailyObjectives = new JsonArray(
+                new JsonArray(ObjectiveCell(21, 1, 0), ObjectiveCell(802, 3, 0), ObjectiveCell(100, 2, 0)),
+                new JsonArray(ObjectiveCell(502, 5, 0), ObjectiveCell(400, 3, 0), ObjectiveCell(101, 2, 0)),
+                new JsonArray(ObjectiveCell(301, 3, 0), ObjectiveCell(202, 4, 0), ObjectiveCell(603, 2, 0)),
+                new JsonArray(ObjectiveCell(21, 1, 0), ObjectiveCell(802, 3, 0), ObjectiveCell(100, 2, 0)),
+                new JsonArray(ObjectiveCell(502, 5, 0), ObjectiveCell(400, 3, 0), ObjectiveCell(101, 2, 0)),
+                new JsonArray(ObjectiveCell(301, 3, 0), ObjectiveCell(202, 4, 0), ObjectiveCell(603, 2, 0)),
+                new JsonArray(ObjectiveCell(302, 3, 0), ObjectiveCell(401, 2, 0), ObjectiveCell(800, 1, 0))
+            );
+
+            var root = new JsonObject
+            {
+                ["MessageOfTheDay"] = "Welcome to RetroRec! Be excellent to each other!",
+                ["CdnBaseUri"] = cdnUri,
+                ["ShareBaseUrl"] = shareUri,
+                ["LevelProgressionMaps"] = new JsonArray(),
+                ["MatchmakingParams"] = new JsonObject
+                {
+                    ["PreferFullRoomsFrequency"] = 1,
+                    ["PreferEmptyRoomsFrequency"] = 0
+                },
+                ["DailyObjectives"] = dailyObjectives,
+                ["ConfigTable"] = new JsonArray(
+                    new JsonObject { ["Key"] = "Gift.DropChance", ["Value"] = "0.5" },
+                    new JsonObject { ["Key"] = "Gift.XP", ["Value"] = "0.5" }
+                ),
+                ["PhotonConfig"] = new JsonObject
+                {
+                    ["CloudRegion"] = "us",
+                    ["CrcCheckEnabled"] = false,
+                    ["EnableServerTracingAfterDisconnect"] = false
+                },
+                ["AutoMicMutingConfig"] = new JsonObject
+                {
+                    ["MicSpamVolumeThreshold"] = 0,
+                    ["MicVolumeSampleInterval"] = 0,
+                    ["MicVolumeSampleRollingWindowLength"] = 0,
+                    ["MicSpamSamplePercentageForWarning"] = 0,
+                    ["MicSpamSamplePercentageForWarningToEnd"] = 0,
+                    ["MicSpamSamplePercentageForForceMute"] = 0,
+                    ["MicSpamSamplePercentageForForceMuteToEnd"] = 0,
+                    ["MicSpamWarningStateVolumeMultiplier"] = 0
+                }
+            };
+
+            return root.ToJsonString(ConfigV2SerializeOptions);
         }
 
         [HttpGet("/api/config/v2")]
@@ -82,8 +97,8 @@ namespace RetroRec_Server.Controllers
         // at runtime. Each missing config the client looks up triggers an
         // IndexOutOfRangeException cascade — easiest fix is to keep adding
         // entries here as new "GameConfig not found:" warnings appear in logs.
-        [HttpGet("/api/gameconfigs/v1/all")]
-        public IActionResult GameConfigs() => Ok(new object[] {
+        private static readonly object[] GameConfigsList =
+        {
             new { Key = "Gift.MaxDaily", Value = "100", StartTime = (string?)null, EndTime = (string?)null },
             new { Key = "Gift.Falloff", Value = "1", StartTime = (string?)null, EndTime = (string?)null },
             new { Key = "Gift.DropChance", Value = "100", StartTime = (string?)null, EndTime = (string?)null },
@@ -105,31 +120,10 @@ namespace RetroRec_Server.Controllers
             new { Key = "UGC.MaxChipsVisible", Value = "5000", StartTime = (string?)null, EndTime = (string?)null },
             new { Key = "Rewards.UseRewardSelection", Value = "0", StartTime = (string?)null, EndTime = (string?)null },
             new { Key = "ClickOnName.MaxRaycastDistance", Value = "5", StartTime = (string?)null, EndTime = (string?)null }
-        });
+        };
 
-        [HttpGet("/api/config/v1/amplitude")]
-        public IActionResult Amplitude() => Ok(new { amplitudeKey = "retrorec" });
-
-        [HttpGet("/api/versioncheck/v4")]
-        public IActionResult VersionCheck() => Ok(new { versionStatus = 0 });
-
-        [HttpGet("/config/LoadingScreenTipData")]
-        public IActionResult LoadingTips() => Ok(Array.Empty<object>());
-
-        [HttpGet("/api/announcement/v1/get")]
-        public IActionResult Announcement() => Ok(Array.Empty<object>());
-
-        [HttpGet("/announcements/v2/mine/unread")]
-        public IActionResult AnnouncementsUnread() => Ok(Array.Empty<object>());
-
-        [HttpGet("/announcements/v2/subscription/mine/unread")]
-        public IActionResult AnnouncementsSubscriptionUnread() => Ok(Array.Empty<object>());
-
-        // Per-user client settings (graphics, voice, comfort options, etc.)
-        // Returning a populated list with sensible defaults stops the client
-        // from spamming setting-prompts on every login.
-        [HttpGet("/api/settings/v2")]
-        public IActionResult Settings() => Ok(new object[] {
+        private static readonly object[] SettingsList =
+        {
             new { Key = "MOD_BLOCKED_TIME", Value = "0" },
             new { Key = "MOD_BLOCKED_DURATION", Value = "0" },
             new { Key = "PlayerSessionCount", Value = "13" },
@@ -159,7 +153,34 @@ namespace RetroRec_Server.Controllers
             new { Key = "Recroom.ChallengeMap", Value = "0" },
             new { Key = "HasCheckedForPlatformReferrers", Value = "True" },
             new { Key = "HAS_OPENED_WATCH_MENU_BEFORE", Value = "True" }
-        });
+        };
+
+        [HttpGet("/api/gameconfigs/v1/all")]
+        public IActionResult GameConfigs() => Ok(GameConfigsList);
+
+        [HttpGet("/api/config/v1/amplitude")]
+        public IActionResult Amplitude() => Ok(new { amplitudeKey = "retrorec" });
+
+        [HttpGet("/api/versioncheck/v4")]
+        public IActionResult VersionCheck() => Ok(new { versionStatus = 0 });
+
+        [HttpGet("/config/LoadingScreenTipData")]
+        public IActionResult LoadingTips() => Ok(Array.Empty<object>());
+
+        [HttpGet("/api/announcement/v1/get")]
+        public IActionResult Announcement() => Ok(Array.Empty<object>());
+
+        [HttpGet("/announcements/v2/mine/unread")]
+        public IActionResult AnnouncementsUnread() => Ok(Array.Empty<object>());
+
+        [HttpGet("/announcements/v2/subscription/mine/unread")]
+        public IActionResult AnnouncementsSubscriptionUnread() => Ok(Array.Empty<object>());
+
+        // Per-user client settings (graphics, voice, comfort options, etc.)
+        // Returning a populated list with sensible defaults stops the client
+        // from spamming setting-prompts on every login.
+        [HttpGet("/api/settings/v2")]
+        public IActionResult Settings() => Ok(SettingsList);
 
         [HttpPost("/api/settings/v2/set")]
         public IActionResult SetSettings() => Ok(new { });
