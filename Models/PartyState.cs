@@ -25,5 +25,21 @@ namespace RetroRec_Server.Controllers
 
         // key = inviteId
         public static readonly ConcurrentDictionary<string, InviteData> Invites = new();
+
+        // key = target account id. Lightweight cheer state for PlayerCheer and
+        // reputation endpoints; this survives for the process lifetime.
+        public static readonly ConcurrentDictionary<int, PlayerCheerSummary> PlayerCheers = new();
+    }
+
+    public class PlayerCheerSummary
+    {
+        public int CheerGeneral { get; set; } = 1;
+        public int CheerHelpful { get; set; } = 1;
+        public int CheerGreatHost { get; set; } = 1;
+        public int CheerSportsman { get; set; } = 1;
+        public int CheerCreative { get; set; } = 1;
+        public int SelectedCheer { get; set; } = 40;
+        public int LastCheerCategory { get; set; } = 0;
+        public DateTime LastCheeredAt { get; set; } = DateTime.UtcNow;
     }
 }
