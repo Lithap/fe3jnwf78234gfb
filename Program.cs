@@ -48,6 +48,75 @@ using (var scope = app.Services.CreateScope())
     db.Database.ExecuteSqlRaw(@"
         CREATE INDEX IF NOT EXISTS ""IX_FriendRelationships_SenderId_TargetId""
             ON ""FriendRelationships"" (""SenderId"", ""TargetId"");");
+
+    // Patch existing tables for columns added after the initial deploy.
+    //
+    // Why this is needed: existing servers were created with older versions
+    // of the Account / UserRoom schemas. EF doesn't auto-migrate column
+    // additions, so when a controller queries (for example) UserRoom.IsPublished
+    // and the DB doesn't have that column, SQLite throws "no such column",
+    // the global exception handler swallows it and returns "200 OK {}", and
+    // the client renders an empty list — i.e. "no rooms anywhere".
+    //
+    // Each AddColumnIfMissing is idempotent: it inspects pragma table_info
+    // first and only ALTERs when the column is actually absent, so it's
+    // safe to run on every boot regardless of which version of the DB the
+    // server was originally provisioned from.
+    AddColumnIfMissing(db, "Accounts", "Level",        "INTEGER NOT NULL DEFAULT 1");
+    AddColumnIfMissing(db, "Accounts", "XP",           "INTEGER NOT NULL DEFAULT 0");
+
+    AddColumnIfMissing(db, "UserRooms", "Description",       "TEXT NOT NULL DEFAULT ''");
+    AddColumnIfMissing(db, "UserRooms", "BaseRoomId",        "INTEGER NOT NULL DEFAULT 0");
+    AddColumnIfMissing(db, "UserRooms", "UnitySceneId",      "TEXT NOT NULL DEFAULT ''");
+    AddColumnIfMissing(db, "UserRooms", "ImageName",         "TEXT NOT NULL DEFAULT ''");
+    AddColumnIfMissing(db, "UserRooms", "Accessibility",     "INTEGER NOT NULL DEFAULT 2");
+    AddColumnIfMissing(db, "UserRooms", "IsPublished",       "INTEGER NOT NULL DEFAULT 0");
+    AddColumnIfMissing(db, "UserRooms", "DataBlob",          "TEXT NOT NULL DEFAULT ''");
+    // ModifiedAt has no NOT NULL default that makes sense for SQLite ALTER —
+    // it permits any value but must be present on the row. Existing rows
+    // get an empty string, which EF reads as DateTime.MinValue. Saving a
+    // room subsequently overwrites it with DateTime.UtcNow.
+    AddColumnIfMissing(db, "UserRooms", "ModifiedAt",        "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00.0000000'");
+
+    static void AddColumnIfMissing(RetroRecDb db, string table, string column, string definition)
+    {
+        try
+        {
+            using var conn = db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) conn.Open();
+
+            bool exists = false;
+            using (var pragma = conn.CreateCommand())
+            {
+                pragma.CommandText = $"PRAGMA table_info(\"{table}\");";
+                using var reader = pragma.ExecuteReader();
+                // PRAGMA table_info returns rows shaped:
+                //   cid | name | type | notnull | dflt_value | pk
+                while (reader.Read())
+                {
+                    if (string.Equals(reader.GetString(1), column, StringComparison.Ordinal))
+                    {
+                        exists = true;
+                        break;
+                    }
+                }
+            }
+
+            if (exists) return;
+
+            using var alter = conn.CreateCommand();
+            alter.CommandText = $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {definition};";
+            alter.ExecuteNonQuery();
+            Console.WriteLine($"[migration] added {table}.{column}");
+        }
+        catch (Exception ex)
+        {
+            // Most likely the table doesn't exist yet (fresh install). That's
+            // fine — EnsureCreated already built the new shape, no patching
+            // needed. Log so we can spot real problems but don't fail boot.
+            Console.WriteLine($"[migration] {table}.{column} skipped: {ex.Message}");
+        }
+    }
 }
 
 app.Use(async (context, next) =>
