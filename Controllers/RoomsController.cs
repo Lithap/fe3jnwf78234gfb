@@ -714,6 +714,11 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/rooms/ownedby/me")]
         [HttpGet("/api/rooms/createdby/me")]
         [HttpGet("/api/rooms/ownedby/me")]
+        // Older API paths used by 2018/2021 builds
+        [HttpGet("/api/rooms/v1/myrooms")]
+        [HttpGet("/rooms/v1/myrooms")]
+        [HttpGet("/api/rooms/v2/myrooms")]
+        [HttpGet("/rooms/v2/myrooms")]
         public IActionResult MyCreatedRooms()
         {
             int callerId = GetAccountIdFromAuth();
@@ -724,6 +729,23 @@ namespace RetroRec_Server.Controllers
             var expanded = myRooms.Select(u => ExpandUserRoom(u)).ToList();
             return Pascal(expanded);
         }
+
+        // Bookmarked and recent rooms — return empty lists; content is not
+        // persisted on this server, but the client needs a 200 response to
+        // continue loading.
+        [HttpGet("/api/rooms/v1/mybookmarkedrooms")]
+        [HttpGet("/rooms/v1/mybookmarkedrooms")]
+        public IActionResult MyBookmarkedRooms() => Ok(new object[] { });
+
+        [HttpGet("/api/rooms/v1/myRecent")]
+        [HttpGet("/rooms/v1/myRecent")]
+        public IActionResult MyRecentRooms() => Ok(new object[] { });
+
+        // 2018 base rooms path used before the /api/rooms/v3/base route.
+        [HttpGet("/api/rooms/v2/baserooms")]
+        [HttpGet("/rooms/v2/baserooms")]
+        public IActionResult BaseRoomsV2([FromQuery] string? tag, [FromQuery] int? take)
+            => Pascal(BuildRoomsList("baserooms.txt", tag, take));
 
         [HttpGet("/rooms/ownedby/{playerId:int}")]
         [HttpGet("/api/rooms/ownedby/{playerId:int}")]
@@ -1060,8 +1082,5 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/images/v5/cheered/bulk")]
         public IActionResult CheeredBulk() => Ok(new object[] { });
 
-        [HttpGet("/api/images/v2/named")]
-        [HttpGet("/images/v2/named")]
-        public IActionResult NamedImages() => Ok(new object[] { });
     }
 }
