@@ -8,6 +8,21 @@ builder.WebHost.ConfigureKestrel(options =>
 });
 var app = builder.Build();
 
+// Ensure the SQLite schema exists on startup. EnsureCreated is idempotent
+// (no-ops if everything is already there) and crucially also creates any
+// NEW tables we add — Bios and FriendRelationships ship in this version
+// so that bios and friend-requests survive server restarts. Existing
+// Accounts / Rooms / UserRooms data is left untouched.
+//
+// Note: EnsureCreated does not run migrations — if we later change a
+// column on an existing table, that needs a real migration. Adding new
+// tables is fine.
+using (var scope = app.Services.CreateScope())
+{
+    using var db = new RetroRecDb();
+    db.Database.EnsureCreated();
+}
+
 app.Use(async (context, next) =>
 {
     Console.WriteLine($"[REQUEST] {context.Request.Method} {context.Request.Path}{context.Request.QueryString}");
