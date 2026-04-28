@@ -17,25 +17,7 @@ namespace RetroRec_Server.Controllers
             platformId ??= Guid.NewGuid().ToString();
             platform ??= "0";
 
-            var account = db.Accounts.FirstOrDefault(a => a.PlatformId == platformId);
-            if (account == null)
-            {
-                account = new Account
-                {
-                    Username = GenerateUsername(),
-                    Platform = platform,
-                    PlatformId = platformId,
-                    AuthToken = Guid.NewGuid().ToString(),
-                    CreatedAt = DateTime.UtcNow,
-                    // New accounts start at Level 1, XP 0. Real progression
-                    // (XP earned from quests, etc.) gets added via PlayerController's
-                    // progression endpoints — they read from these columns now.
-                    Level = 1,
-                    XP = 0
-                };
-                db.Accounts.Add(account);
-                db.SaveChanges();
-            }
+            var account = GetOrCreateAccountForPlatform(db, platform, platformId);
 
             var fakeJwt = MakeFakeJwt(account.Id);
             return Ok(new
@@ -58,7 +40,7 @@ namespace RetroRec_Server.Controllers
 
             form.TryGetValue("username", out var username);
             form.TryGetValue("displayName", out var displayName);
-            var chosenName = username ?? displayName;
+            var chosenName = (username ?? displayName)?.Trim();
 
             int accountId = GetAccountIdFromAuth();
             Account account = null;
@@ -66,11 +48,31 @@ namespace RetroRec_Server.Controllers
             if (accountId > 0)
                 account = db.Accounts.FirstOrDefault(a => a.Id == accountId);
 
+            if (!string.IsNullOrWhiteSpace(chosenName))
+            {
+                // Reject duplicates so two players can't both pick "Skibidi"
+                // and confuse the friend / @mention / search flows. Our own
+                // row is allowed to "rename" to its current name as a no-op.
+                bool takenBySomeoneElse = db.Accounts.Any(a =>
+                    a.Username == chosenName &&
+                    (account == null || a.Id != account.Id));
+
+                if (takenBySomeoneElse)
+                {
+                    return Conflict(new
+                    {
+                        ErrorCode = 1,
+                        Error = "username_taken",
+                        Message = $"The username '{chosenName}' is already taken."
+                    });
+                }
+            }
+
             if (account == null)
             {
                 account = new Account
                 {
-                    Username = chosenName ?? GenerateUsername(),
+                    Username = string.IsNullOrWhiteSpace(chosenName) ? GenerateUniqueUsername(db) : chosenName,
                     Platform = "0",
                     PlatformId = Guid.NewGuid().ToString(),
                     AuthToken = Guid.NewGuid().ToString(),
@@ -246,22 +248,8 @@ namespace RetroRec_Server.Controllers
         public IActionResult CachedLogin(int platform, string platformId)
         {
             using var db = new RetroRecDb();
-            var account = db.Accounts.FirstOrDefault(a => a.PlatformId == platformId);
-            if (account == null)
-            {
-                account = new Account
-                {
-                    Username = GenerateUsername(),
-                    Platform = platform.ToString(),
-                    PlatformId = platformId,
-                    AuthToken = Guid.NewGuid().ToString(),
-                    CreatedAt = DateTime.UtcNow,
-                    Level = 1,
-                    XP = 0
-                };
-                db.Accounts.Add(account);
-                db.SaveChanges();
-            }
+            var account = GetOrCreateAccountForPlatform(db, platform.ToString(), platformId);
+
             // Pascal cased so the client populates the cached account row
             // properly on subsequent boots. CamelCase here was part of why
             // the second login session ended up showing "PlayerName" in
@@ -282,10 +270,70 @@ namespace RetroRec_Server.Controllers
         [HttpGet("eac/challenge")]
         public IActionResult EacChallenge() => Ok("\":3\"");
 
-        private static string GenerateUsername()
+        // Serializes account creation so two parallel requests for the same
+        // brand-new Steam id don't both pass the FirstOrDefault null check
+        // and create duplicate rows. Cheap because we only hold the lock
+        // long enough to do a re-check + insert; existing accounts skip
+        // the lock entirely.
+        private static readonly object _accountCreateLock = new();
+
+        // One Steam id (or other platform id) = one account, period. Both
+        // /connect/token and /cachedlogin/forplatformid go through this so
+        // we have exactly one place that decides "is this a registration
+        // or a returning login?".
+        private static Account GetOrCreateAccountForPlatform(RetroRecDb db, string platform, string platformId)
+        {
+            var account = db.Accounts.FirstOrDefault(a => a.PlatformId == platformId);
+            if (account != null) return account;
+
+            lock (_accountCreateLock)
+            {
+                // Re-check inside the lock — if we lost the race, another
+                // request just created the row; reuse it instead of inserting
+                // a duplicate.
+                account = db.Accounts.FirstOrDefault(a => a.PlatformId == platformId);
+                if (account != null) return account;
+
+                account = new Account
+                {
+                    Username = GenerateUniqueUsername(db),
+                    Platform = platform,
+                    PlatformId = platformId,
+                    AuthToken = Guid.NewGuid().ToString(),
+                    CreatedAt = DateTime.UtcNow,
+                    // New accounts start at Level 1, XP 0. Real progression
+                    // (XP earned from quests, etc.) gets added via
+                    // PlayerController's progression endpoints — they read
+                    // from these columns now.
+                    Level = 1,
+                    XP = 0
+                };
+                db.Accounts.Add(account);
+                db.SaveChanges();
+                return account;
+            }
+        }
+
+        // Generates a "Player####" name that is guaranteed to be unique
+        // against the current Accounts table. The old version did
+        // `new Random().Next(1000, 9999)` with no DB check, so two new
+        // accounts could collide on the same name (and the new unique
+        // index would then reject the second one). Probes up to 50 random
+        // candidates, then falls back to incrementing from the highest
+        // existing Player#### so we always succeed.
+        private static string GenerateUniqueUsername(RetroRecDb db)
         {
             var rng = new Random();
-            return $"Player{rng.Next(1000, 9999)}";
+            for (int i = 0; i < 50; i++)
+            {
+                var candidate = $"Player{rng.Next(1000, 100000)}";
+                if (!db.Accounts.Any(a => a.Username == candidate))
+                    return candidate;
+            }
+
+            int next = 1000;
+            while (db.Accounts.Any(a => a.Username == $"Player{next}")) next++;
+            return $"Player{next}";
         }
 
         // Reads Level/XP from the actual account row now instead of hardcoded
