@@ -19,6 +19,9 @@ namespace RetroRec_Server.Controllers
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, List<FlatRoom>>
             _roomsCache = new();
 
+        private static readonly JsonSerializerOptions _caseInsensitiveOpts =
+            new() { PropertyNameCaseInsensitive = true };
+
         // ---- photo store (in-memory, resets on restart) ----
         private static long _nextImageId = 1000;
 
@@ -68,8 +71,7 @@ namespace RetroRec_Server.Controllers
                     if (System.IO.File.Exists(path))
                     {
                         var json = System.IO.File.ReadAllText(path);
-                        return JsonSerializer.Deserialize<List<FlatRoom>>(json,
-                            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+                        return JsonSerializer.Deserialize<List<FlatRoom>>(json, _caseInsensitiveOpts)
                             ?? new List<FlatRoom>();
                     }
                 }
@@ -91,7 +93,7 @@ namespace RetroRec_Server.Controllers
 
         private object ExpandRoom(FlatRoom r, string tag)
         {
-            var safeTag = string.IsNullOrEmpty(tag) ? "rro" : tag.Replace("#", "");
+            var safeTag = string.IsNullOrEmpty(tag) ? "rro" : tag.Replace("#", string.Empty, StringComparison.Ordinal);
             var sceneId = RRConstants.GetSceneIdForRoom(r.RoomId);
             int callerId = GetAccountIdFromAuth();
             long currentUserId = callerId > 0 ? callerId : 2L;
@@ -344,10 +346,10 @@ namespace RetroRec_Server.Controllers
         }
 
         [HttpGet("/rooms/{roomId:int}/playerdata/me")]
-        public IActionResult RoomPlayerData(int roomId) => Ok(new { data = "" });
+        public IActionResult RoomPlayerData(int _roomId = 0) => Ok(new { data = "" });
 
         [HttpGet("/rooms/{roomId:int}/interactionby/me")]
-        public IActionResult RoomInteractionByMe(int roomId) => Ok(new
+        public IActionResult RoomInteractionByMe(int _roomId = 0) => Ok(new
         {
             Cheered = false,
             Favorited = false
@@ -385,7 +387,7 @@ namespace RetroRec_Server.Controllers
         // copying the scene/template from the base room.
         [HttpPost("/rooms/{roomId:int}/clone")]
         [HttpPost("/api/rooms/{roomId:int}/clone")]
-        public async Task<IActionResult> CloneRoom(int roomId, [FromForm] string name = null, [FromQuery] string nameQ = null)
+        public async Task<IActionResult> CloneRoom(int roomId, [FromForm] string? name = null, [FromQuery] string? nameQ = null)
         {
             int callerId = GetAccountIdFromAuth();
             if (callerId == 0) callerId = 2;
@@ -764,7 +766,7 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/rooms/{roomId:int}/bans")]
         [HttpDelete("/rooms/{roomId:int}/bans")]
         [HttpDelete("/api/rooms/{roomId:int}/bans")]
-        public IActionResult RoomBans(int roomId) => Ok(Array.Empty<object>());
+        public IActionResult RoomBans(int _roomId = 0) => Ok(Array.Empty<object>());
 
         // ============ MATCHMAKING / GOTO ============
 
@@ -788,7 +790,7 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/api/matchmaking/v2/goto/room/{roomName}")]
         [HttpPost("/api/matchmaking/v2/goto/room/{roomName}/{subRoomName}")]
         [HttpGet("/api/matchmaking/v2/goto/room/{roomName}/{subRoomName}")]
-        public IActionResult GotoRoom(string roomName, string subRoomName = null)
+        public IActionResult GotoRoom(string roomName, string? subRoomName = null)
         {
             int roomId = RRConstants.RoomNameToId(roomName);
 
@@ -923,11 +925,11 @@ namespace RetroRec_Server.Controllers
         // ============ ROOM INSTANCES ============
 
         [HttpPost("/roominstance/{id}/reportjoinresult")]
-        public IActionResult ReportJoin(long id) => NoContent();
+        public IActionResult ReportJoin(long _id = 0) => NoContent();
 
         [HttpPost("/roominstance/{id}/inprogress")]
         [HttpPut("/roominstance/{id}/inprogress")]
-        public IActionResult ReportInProgress(long id) => NoContent();
+        public IActionResult ReportInProgress(long _id = 0) => NoContent();
 
         // ============ ROOM CURRENCIES / EQUIPMENT / KEYS ============
 
@@ -986,7 +988,7 @@ namespace RetroRec_Server.Controllers
             if (accountId == 0) accountId = 2;
 
             int roomId = 1;
-            byte[] imageData = null;
+            byte[]? imageData = null;
             string contentType = "image/jpeg";
 
             if (Request.HasFormContentType)

@@ -11,12 +11,18 @@ namespace RetroRec_Server.Controllers
     // RetroRecBase is just a base ControllerBase with our utilities tacked
     // on — every controller in the project inherits from it instead of
     // ControllerBase directly.
+    // Shared serializer options accessed by all controllers and static helpers.
+    internal static class SerializerOptions
+    {
+        internal static readonly JsonSerializerOptions Pascal =
+            new() { PropertyNamingPolicy = null };
+    }
+
     public abstract class RetroRecBase : ControllerBase
     {
-        // Shared Pascal-case serializer options — reused everywhere instead of
-        // allocating a new JsonSerializerOptions on every request.
-        internal static readonly JsonSerializerOptions PascalOpts =
-            new() { PropertyNamingPolicy = null };
+        // Convenience alias so instance methods and derived classes can use
+        // the short name PascalOpts without qualifying it.
+        internal static readonly JsonSerializerOptions PascalOpts = SerializerOptions.Pascal;
 
         // Per-user room instance state. Used by Player + Rooms controllers
         // to keep each player's "where am I" state independent. Without
@@ -34,7 +40,7 @@ namespace RetroRec_Server.Controllers
             {
                 var auth = Request.Headers["Authorization"].ToString();
                 if (string.IsNullOrEmpty(auth)) return 0;
-                var token = auth.StartsWith("Bearer ") ? auth.Substring(7) : auth;
+                var token = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..] : auth;
                 var parts = token.Split('.');
                 if (parts.Length < 2) return 0;
                 var payload = parts[1].Replace('-', '+').Replace('_', '/');
