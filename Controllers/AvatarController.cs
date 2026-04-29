@@ -11,7 +11,7 @@ namespace RetroRec_Server.Controllers
         // Cache the avatar items file in memory after first read. avataritems.json
         // is ~190 KB and gets requested on basically every login + room load —
         // re-reading from disk every time was noticeable in the server log.
-        private static string _avatarItemsCache = null;
+        private static string? _avatarItemsCache = null;
 
         private string GetAvatarItemsJson()
         {
@@ -61,7 +61,7 @@ namespace RetroRec_Server.Controllers
         });
 
         [HttpGet("/api/avatar/v1/defaultunlocked")]
-        public IActionResult DefaultUnlocked() => Ok(new object[] { });
+        public IActionResult DefaultUnlocked() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/avatar/v4/items")]
         [HttpGet("/api/avatar/v3/items")]
@@ -76,6 +76,6 @@ namespace RetroRec_Server.Controllers
         public IActionResult AvatarUnlocked() => Content(GetAvatarItemsJson(), "application/json");
 
         [HttpGet("/api/avatar/v2/gifts")]
-        public IActionResult AvatarGifts() => Ok(new object[] { });
+        public IActionResult AvatarGifts() => Ok(Array.Empty<object>());
     }
 }

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
+using RetroRec_Server.Models;
 
 namespace RetroRec_Server.Controllers
 {
@@ -53,7 +54,7 @@ namespace RetroRec_Server.Controllers
             StartAt = "2021-12-27T21:27:38.188Z",
             EndAt = "2030-12-27T21:27:38.188Z",
             ServerTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-            Challenges = new object[] { },
+            Challenges = Array.Empty<object>(),
             Gift = new
             {
                 GiftDropId = 1,
@@ -216,18 +217,18 @@ namespace RetroRec_Server.Controllers
         public IActionResult ClaimGift() => Ok(new { });
 
         [HttpGet("/api/gamerewards/v1/pending")]
-        public IActionResult PendingRewards() => Ok(new object[] { });
+        public IActionResult PendingRewards() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/playerevents/v1/all")]
         public IActionResult PlayerEvents() => Ok(new
         {
-            Created = new object[] { },
-            Responses = new object[] { }
+            Created = Array.Empty<object>(),
+            Responses = Array.Empty<object>()
         });
 
         [HttpGet("/api/playerevents/v1/room/{roomId:int}")]
         [HttpGet("/playerevents/v1/room/{roomId:int}")]
-        public IActionResult PlayerEventsForRoom(int roomId) => Ok(new object[] { });
+        public IActionResult PlayerEventsForRoom(int roomId) => Ok(Array.Empty<object>());
 
         // ============ LEADERBOARDS ============
         // Quest scoreboards live here. GetPlayerRank/CheckAndSetStat are
@@ -255,7 +256,7 @@ namespace RetroRec_Server.Controllers
 
         [HttpPost("/leaderboard/GetTopScores")]
         [HttpPost("/api/leaderboard/GetTopScores")]
-        public IActionResult LeaderboardTopScores() => Ok(new object[] { });
+        public IActionResult LeaderboardTopScores() => Ok(Array.Empty<object>());
 
         [HttpGet("/leaderboard/GetNearbyScores")]
         [HttpPost("/leaderboard/GetNearbyScores")]

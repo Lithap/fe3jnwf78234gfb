@@ -1,3 +1,5 @@
+namespace RetroRec_Server.Models;
+
 public class PlayerCheer
 {
     public int Id { get; set; }

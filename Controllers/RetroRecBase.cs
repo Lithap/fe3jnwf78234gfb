@@ -13,6 +13,11 @@ namespace RetroRec_Server.Controllers
     // ControllerBase directly.
     public abstract class RetroRecBase : ControllerBase
     {
+        // Shared Pascal-case serializer options — reused everywhere instead of
+        // allocating a new JsonSerializerOptions on every request.
+        internal static readonly JsonSerializerOptions PascalOpts =
+            new() { PropertyNamingPolicy = null };
+
         // Per-user room instance state. Used by Player + Rooms controllers
         // to keep each player's "where am I" state independent. Without
         // per-user tracking, two players overwrite each other and the client
@@ -53,10 +58,7 @@ namespace RetroRec_Server.Controllers
         // domain objects (Avatar, Slideshow, room data, etc.).
         protected IActionResult Pascal(object obj)
         {
-            var json = JsonSerializer.Serialize(obj, new JsonSerializerOptions
-            {
-                PropertyNamingPolicy = null
-            });
+            var json = JsonSerializer.Serialize(obj, PascalOpts);
             return Content(json, "application/json");
         }
     }

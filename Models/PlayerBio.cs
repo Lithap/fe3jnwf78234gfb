@@ -1,3 +1,5 @@
+namespace RetroRec_Server.Models;
+
 // Persisted bio storage. Replaces the previous in-memory
 // PartyState.Bios dictionary which was lost on every server restart —
 // players reported "I set my bio, restarted the server, it's gone".

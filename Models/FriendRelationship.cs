@@ -1,3 +1,5 @@
+namespace RetroRec_Server.Models;
+
 // Persisted friend-request / friendship storage. Replaces the previous
 // in-memory PartyState.FriendRequests dictionary which was lost on every
 // server restart — players reported "I added them as a friend, server

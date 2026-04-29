@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 using System.Threading;
+using RetroRec_Server.Models;
 
 namespace RetroRec_Server.Controllers
 {
@@ -23,8 +24,8 @@ namespace RetroRec_Server.Controllers
 
         private class ImageEntry
         {
-            public byte[] Data { get; set; }
-            public string ContentType { get; set; }
+            public byte[] Data { get; set; } = Array.Empty<byte>();
+            public string ContentType { get; set; } = "image/jpeg";
             public int RoomId { get; set; }
             public int AccountId { get; set; }
             public DateTime CreatedAt { get; set; }
@@ -43,10 +44,10 @@ namespace RetroRec_Server.Controllers
         private class FlatRoom
         {
             public int RoomId { get; set; }
-            public string Name { get; set; }
-            public string Description { get; set; }
+            public string Name { get; set; } = "";
+            public string Description { get; set; } = "";
             public long CreatorPlayerId { get; set; }
-            public string ImageName { get; set; }
+            public string ImageName { get; set; } = "";
             public int State { get; set; }
             public int Accessibility { get; set; }
             public bool SupportsLevelVoting { get; set; }
@@ -77,7 +78,7 @@ namespace RetroRec_Server.Controllers
             });
         }
 
-        private FlatRoom FindBaseRoom(int roomId)
+        private FlatRoom? FindBaseRoom(int roomId)
         {
             foreach (var pair in _roomFiles)
             {
@@ -101,7 +102,7 @@ namespace RetroRec_Server.Controllers
                 Description = r.Description ?? "",
                 ImageName = r.ImageName ?? "",
                 WarningMask = 0,
-                CustomWarning = (string)null,
+                CustomWarning = (string?)null,
                 CreatorAccountId = currentUserId,
                 State = r.State,
                 Accessibility = r.Accessibility,
@@ -139,9 +140,9 @@ namespace RetroRec_Server.Controllers
                 Roles = new object[] { new { AccountId = currentUserId, Role = 255 } },
                 Tags = new object[] { new { Tag = safeTag, Type = 2 } },
                 DataBlob = "",
-                PromoImages = new object[] { },
-                PromoExternalContent = new object[] { },
-                LoadScreens = new object[] { }
+                PromoImages = Array.Empty<object>(),
+                PromoExternalContent = Array.Empty<object>(),
+                LoadScreens = Array.Empty<object>()
             };
         }
 
@@ -156,7 +157,7 @@ namespace RetroRec_Server.Controllers
                 Description = u.Description ?? "",
                 ImageName = u.ImageName ?? "",
                 WarningMask = 0,
-                CustomWarning = (string)null,
+                CustomWarning = (string?)null,
                 CreatorAccountId = u.CreatorAccountId,
                 State = 0,
                 Accessibility = u.Accessibility,
@@ -192,11 +193,11 @@ namespace RetroRec_Server.Controllers
                     }
                 },
                 Roles = new object[] { new { AccountId = u.CreatorAccountId, Role = 255 } },
-                Tags = new object[] { },
+                Tags = Array.Empty<object>(),
                 DataBlob = u.DataBlob ?? "",
-                PromoImages = new object[] { },
-                PromoExternalContent = new object[] { },
-                LoadScreens = new object[] { }
+                PromoImages = Array.Empty<object>(),
+                PromoExternalContent = Array.Empty<object>(),
+                LoadScreens = Array.Empty<object>()
             };
         }
 
@@ -211,7 +212,7 @@ namespace RetroRec_Server.Controllers
                 Description = "Your private dorm",
                 ImageName = "",
                 WarningMask = 0,
-                CustomWarning = (string)null,
+                CustomWarning = (string?)null,
                 CreatorAccountId = currentUserId,
                 State = 0,
                 Accessibility = 2,
@@ -249,9 +250,9 @@ namespace RetroRec_Server.Controllers
                 Roles = new object[] { new { AccountId = currentUserId, Role = 255 } },
                 Tags = new object[] { new { Tag = "rro", Type = 2 } },
                 DataBlob = "",
-                PromoImages = new object[] { },
-                PromoExternalContent = new object[] { },
-                LoadScreens = new object[] { }
+                PromoImages = Array.Empty<object>(),
+                PromoExternalContent = Array.Empty<object>(),
+                LoadScreens = Array.Empty<object>()
             };
         }
 
@@ -357,7 +358,7 @@ namespace RetroRec_Server.Controllers
         public IActionResult RoomFilters() => Ok(new
         {
             PinnedFilters = new[] { "recroomoriginal", "community" },
-            PopularFilters = new string[] { }
+            PopularFilters = Array.Empty<string>()
         });
 
         [HttpGet("/rooms/favoritedby/me")]
@@ -370,11 +371,11 @@ namespace RetroRec_Server.Controllers
 
         [HttpGet("/api/inventions/v2/mine")]
         [HttpGet("/inventions/v2/mine")]
-        public IActionResult MyInventions() => Ok(new object[] { });
+        public IActionResult MyInventions() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/inventions/v2/search")]
         [HttpGet("/inventions/v2/search")]
-        public IActionResult InventionsSearch() => Ok(new object[] { });
+        public IActionResult InventionsSearch() => Ok(Array.Empty<object>());
 
         // ============ CREATE ROOM (clone from base) ============
 
@@ -722,7 +723,7 @@ namespace RetroRec_Server.Controllers
         public IActionResult MyCreatedRooms()
         {
             int callerId = GetAccountIdFromAuth();
-            if (callerId == 0) return Ok(new object[] { });
+            if (callerId == 0) return Ok(Array.Empty<object>());
 
             using var db = new RetroRecDb();
             var myRooms = db.UserRooms.Where(u => u.CreatorAccountId == callerId).ToList();
@@ -735,11 +736,11 @@ namespace RetroRec_Server.Controllers
         // continue loading.
         [HttpGet("/api/rooms/v1/mybookmarkedrooms")]
         [HttpGet("/rooms/v1/mybookmarkedrooms")]
-        public IActionResult MyBookmarkedRooms() => Ok(new object[] { });
+        public IActionResult MyBookmarkedRooms() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/rooms/v1/myRecent")]
         [HttpGet("/rooms/v1/myRecent")]
-        public IActionResult MyRecentRooms() => Ok(new object[] { });
+        public IActionResult MyRecentRooms() => Ok(Array.Empty<object>());
 
         // 2018 base rooms path used before the /api/rooms/v3/base route.
         [HttpGet("/api/rooms/v2/baserooms")]
@@ -763,7 +764,7 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/rooms/{roomId:int}/bans")]
         [HttpDelete("/rooms/{roomId:int}/bans")]
         [HttpDelete("/api/rooms/{roomId:int}/bans")]
-        public IActionResult RoomBans(int roomId) => Ok(new object[] { });
+        public IActionResult RoomBans(int roomId) => Ok(Array.Empty<object>());
 
         // ============ MATCHMAKING / GOTO ============
 
@@ -932,28 +933,28 @@ namespace RetroRec_Server.Controllers
 
         [HttpGet("/api/roomcurrencies/v1/currencies")]
         [HttpGet("/roomcurrencies/v1/currencies")]
-        public IActionResult RoomCurrencies() => Ok(new object[] { });
+        public IActionResult RoomCurrencies() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/roomcurrencies/v1/getAllBalances")]
         [HttpGet("/roomcurrencies/v1/getAllBalances")]
-        public IActionResult RoomCurrenciesAllBalances() => Ok(new object[] { });
+        public IActionResult RoomCurrenciesAllBalances() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/roomcurrencies/v1/betaEnabled")]
         [HttpGet("/roomcurrencies/v1/betaEnabled")]
         public IActionResult RoomCurrenciesBeta() => Ok(true);
 
         [HttpGet("/api/equipment/v2/getUnlocked")]
-        public IActionResult EquipmentUnlocked() => Ok(new object[] { });
+        public IActionResult EquipmentUnlocked() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/consumables/v2/getUnlocked")]
-        public IActionResult ConsumablesUnlocked() => Ok(new object[] { });
+        public IActionResult ConsumablesUnlocked() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/roomkeys/v1/mine")]
-        public IActionResult RoomKeysMine() => Ok(new object[] { });
+        public IActionResult RoomKeysMine() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/roomkeys/v1/room")]
         [HttpGet("/roomkeys/v1/room")]
-        public IActionResult RoomKeysRoom() => Ok(new object[] { });
+        public IActionResult RoomKeysRoom() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/quickPlay/v1/getandclear")]
         public IActionResult QuickPlayGetAndClear() => Ok(new { });
@@ -970,7 +971,7 @@ namespace RetroRec_Server.Controllers
             PlayerCreated = true,
             CreatedAt = e.CreatedAt.ToString("O"),
             CheerCount = 0,
-            TaggedPlayerIds = new int[] { }
+            TaggedPlayerIds = Array.Empty<int>()
         };
 
         // Camera gadget upload. Tries multipart first, raw-body as fallback
@@ -1080,7 +1081,7 @@ namespace RetroRec_Server.Controllers
         // Bulk cheered + named image stubs — stop 404 noise.
         [HttpGet("/api/images/v5/cheered/bulk")]
         [HttpGet("/images/v5/cheered/bulk")]
-        public IActionResult CheeredBulk() => Ok(new object[] { });
+        public IActionResult CheeredBulk() => Ok(Array.Empty<object>());
 
     }
 }

@@ -1,3 +1,5 @@
+namespace RetroRec_Server.Models;
+
 public class UserRoom
 {
     public int Id { get; set; }
