@@ -98,8 +98,12 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/api/config/v1/amplitude")]
         public IActionResult Amplitude() => Ok(new { amplitudeKey = "retrorec" });
 
-        [HttpGet("/api/versioncheck/v4")]
-        public IActionResult VersionCheck() => Ok(new { versionStatus = 0 });
+        // Accept all versioncheck variants. The 2016–2021 builds use different
+        // sub-paths (v1, v2, v4, plus version-coded paths like versioncheck/201809...)
+        // so we catch everything with a wildcard suffix.
+        [HttpGet("/api/versioncheck/{*rest}")]
+        [HttpGet("/versioncheck/{*rest}")]
+        public IActionResult VersionCheck(string rest = "") => Ok(new { ValidVersion = true, VersionStatus = 0 });
 
         [HttpGet("/config/LoadingScreenTipData")]
         public IActionResult LoadingTips() => Ok(new object[] { });

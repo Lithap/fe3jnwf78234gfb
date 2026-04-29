@@ -416,6 +416,66 @@ namespace RetroRec_Server.Controllers
         [HttpGet("eac/challenge")]
         public IActionResult EacChallenge() => Ok("\":3\"");
 
+        // ============ OLD PLATFORM LOGIN (2018 / some 2021 builds) ============
+        //
+        // Before the OpenID / connect/token flow the 2018 client used
+        // /api/platformlogin/v1/* paths. 2021 uses connect/token but some
+        // builds still probe these during the login sequence. All three
+        // variants delegate to GetOrCreateAccountForPlatform like
+        // /cachedlogin/forplatformid does.
+
+        [HttpPost("api/platformlogin/v1/getcachedlogins")]
+        [HttpPost("platformlogin/v1/getcachedlogins")]
+        public IActionResult PlatformLoginGetCachedLogins([FromForm] Dictionary<string, string> form)
+        {
+            form.TryGetValue("platform_id", out var platformId);
+            form.TryGetValue("platform", out var platform);
+            platformId ??= Guid.NewGuid().ToString();
+            platform ??= "0";
+
+            using var db = new RetroRecDb();
+            var account = GetOrCreateAccountForPlatform(db, platform, platformId);
+            var json = System.Text.Json.JsonSerializer.Serialize(new[] {
+                new {
+                    Platform = int.TryParse(platform, out var p) ? p : 0,
+                    PlatformId = platformId,
+                    AccountId = account.Id,
+                    LastLoginTime = "0001-01-01T00:00:00"
+                }
+            }, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = null });
+            return Content(json, "application/json");
+        }
+
+        [HttpPost("api/platformlogin/v1/loginaccount")]
+        [HttpPost("platformlogin/v1/loginaccount")]
+        [HttpPost("api/platformlogin/v1/createaccount")]
+        [HttpPost("platformlogin/v1/createaccount")]
+        [HttpPost("api/platformlogin/v1/logincached")]
+        [HttpPost("platformlogin/v1/logincached")]
+        [HttpPost("api/platformlogin/v6")]
+        [HttpPost("platformlogin/v6")]
+        [HttpPost("api/platformlogin/v1/profiles")]
+        [HttpPost("platformlogin/v1/profiles")]
+        public IActionResult PlatformLoginCompat([FromForm] Dictionary<string, string> form)
+        {
+            form ??= new Dictionary<string, string>();
+            form.TryGetValue("platform_id", out var platformId);
+            form.TryGetValue("platform", out var platform);
+            platformId ??= Guid.NewGuid().ToString();
+            platform ??= "0";
+
+            using var db = new RetroRecDb();
+            var account = GetOrCreateAccountForPlatform(db, platform, platformId);
+            var jwt = MakeFakeJwt(account.Id);
+            return Ok(new
+            {
+                access_token = jwt,
+                refresh_token = jwt,
+                key = "",
+                Account = BuildAccountJson(account)
+            });
+        }
+
         // Serializes account creation so two parallel requests for the same
         // brand-new Steam id don't both pass the FirstOrDefault null check
         // and create duplicate rows. Cheap because we only hold the lock
@@ -501,6 +561,10 @@ namespace RetroRec_Server.Controllers
             // those are supposed to be image GUIDs and the client tries to
             // resolve them as URLs. Empty string falls through to the
             // image catchall (1x1 transparent PNG) instead of erroring.
+            //
+            // CanReceiveInvites=true is required for the 2021 client to show
+            // the "Invite to party" and "Friend request" buttons on player
+            // cards. Without it those interactive elements are hidden.
             return new
             {
                 AccountId = a.Id,
@@ -513,6 +577,7 @@ namespace RetroRec_Server.Controllers
                 Platforms = 0,
                 Level = a.Level,
                 XP = a.XP,
+                CanReceiveInvites = true,
                 PlatformTags = new object[] { }
             };
         }

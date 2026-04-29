@@ -103,10 +103,49 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/chat/v2/purify")]
         [HttpPost("/api/chat/v1/purify")]
         [HttpPost("/chat/v1/purify")]
-        public IActionResult ChatPurify()
+        public async Task<IActionResult> ChatPurify()
         {
-            // Echo-through stub: no profanity filter server-side for RetroRec.
-            return Pascal(new { PurifiedText = "", ErrorCode = 0 });
+            // Echo the input text back — no server-side filter.
+            // Client sends {"text":"..."} or form field "text"; we echo whatever
+            // was passed so the chat message is not lost.
+            string text = "";
+            try
+            {
+                if (Request.HasFormContentType && Request.Form.TryGetValue("text", out var formText))
+                {
+                    text = formText.ToString();
+                }
+                else if (Request.ContentLength.GetValueOrDefault() > 0)
+                {
+                    Request.EnableBuffering();
+                    if (Request.Body.CanSeek) Request.Body.Position = 0;
+                    using var reader = new System.IO.StreamReader(Request.Body, leaveOpen: true);
+                    var body = await reader.ReadToEndAsync();
+                    if (Request.Body.CanSeek) Request.Body.Position = 0;
+                    if (!string.IsNullOrWhiteSpace(body))
+                    {
+                        if (body.TrimStart().StartsWith("{"))
+                        {
+                            using var doc = System.Text.Json.JsonDocument.Parse(body);
+                            foreach (var key in new[] { "text", "Text", "message", "Message" })
+                            {
+                                if (doc.RootElement.TryGetProperty(key, out var el) &&
+                                    el.ValueKind == System.Text.Json.JsonValueKind.String)
+                                {
+                                    text = el.GetString() ?? "";
+                                    break;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            text = body;
+                        }
+                    }
+                }
+            }
+            catch { }
+            return Pascal(new { PurifiedText = text, ErrorCode = 0 });
         }
 
         [HttpGet("/thread")]
@@ -117,6 +156,87 @@ namespace RetroRec_Server.Controllers
 
         [HttpGet("/club/mine/member")]
         public IActionResult ClubMine() => NoContent();
+
+        // ============ PRESENCE ============
+
+        // Older 2018/2021 builds call presence/v3/heartbeat. Returns same
+        // shape as /player/heartbeat so the client stays online.
+        [HttpPost("/api/presence/v3/heartbeat")]
+        [HttpPost("/presence/v3/heartbeat")]
+        [HttpPost("/api/presence/v2/heartbeat")]
+        [HttpPost("/presence/v2/heartbeat")]
+        [HttpPost("/api/presence/v1/heartbeat")]
+        [HttpPost("/presence/v1/heartbeat")]
+        public IActionResult PresenceHeartbeat()
+        {
+            int playerId = GetAccountIdFromAuth();
+            if (playerId == 0) playerId = 2;
+            RetroRecBase.UserRoomInstances.TryGetValue(playerId, out var roomInstance);
+            return Pascal(new
+            {
+                PlayerId = playerId,
+                StatusVisibility = 0,
+                DeviceClass = 0,
+                RoomInstance = roomInstance,
+                IsOnline = true
+            });
+        }
+
+        [HttpGet("/api/presence/v1/setplayertype")]
+        [HttpPost("/api/presence/v1/setplayertype")]
+        [HttpPut("/api/presence/v1/setplayertype")]
+        [HttpGet("/presence/v1/setplayertype")]
+        [HttpPost("/presence/v1/setplayertype")]
+        [HttpPut("/presence/v1/setplayertype")]
+        public IActionResult SetPlayerType() => Ok(new { });
+
+        // ============ NOTIFICATIONS / EVENTS ============
+
+        [HttpGet("/api/notification/v2")]
+        [HttpGet("/notification/v2")]
+        [HttpGet("/api/notification/v1")]
+        [HttpGet("/notification/v1")]
+        public IActionResult Notifications() => Ok(new object[] { });
+
+        [HttpGet("/api/playerevents/v1/all")]
+        [HttpGet("/playerevents/v1/all")]
+        public IActionResult PlayerEvents() => Pascal(new { Created = new object[] { }, Responses = new object[] { } });
+
+        [HttpGet("/api/playersubscriptions/v1/my")]
+        [HttpGet("/playersubscriptions/v1/my")]
+        public IActionResult PlayerSubscriptions() => Ok(new object[] { });
+
+        // ============ CHAT ============
+
+        // Some 2018/2021 builds hit /api/sanitize/v1/isPure for text chat.
+        // Return IsPure=true so the message is never dropped.
+        [HttpGet("/api/sanitize/v1/isPure")]
+        [HttpPost("/api/sanitize/v1/isPure")]
+        [HttpGet("/sanitize/v1/isPure")]
+        [HttpPost("/sanitize/v1/isPure")]
+        public IActionResult SanitizeIsPure() => Ok(new { IsPure = true });
+
+        [HttpGet("/api/chat/v2/myChats")]
+        [HttpGet("/chat/v2/myChats")]
+        [HttpGet("/api/chat/v1/myChats")]
+        [HttpGet("/chat/v1/myChats")]
+        public IActionResult MyChats() => Ok(new object[] { });
+
+        // ============ CHECKLIST / CHALLENGES ============
+
+        // 2018/2021 builds check in-game checklist on boot. Return three dummy
+        // objectives so the client's checklist panel populates and doesn't hang.
+        [HttpGet("/api/checklist/v1/current")]
+        [HttpGet("/checklist/v1/current")]
+        public IActionResult ChecklistCurrent() => Ok(new object[] {
+            new { Order = 0, Objective = 3000, Count = 3, CreditAmount = 100 },
+            new { Order = 1, Objective = 3001, Count = 3, CreditAmount = 100 },
+            new { Order = 2, Objective = 3002, Count = 3, CreditAmount = 100 }
+        });
+
+        [HttpGet("/api/challenge/v1/getCurrent")]
+        [HttpGet("/challenge/v1/getCurrent")]
+        public IActionResult ChallengeCurrent() => Ok(new { Success = true, Message = "RetroRec" });
 
         // ============ IMAGE CATCHALL ============
         // Any unknown /something request returns a 1x1 PNG. This catches
