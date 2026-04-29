@@ -44,7 +44,7 @@ namespace RetroRec_Server.Controllers
             var chosenName = (username ?? displayName)?.Trim();
 
             int accountId = GetAccountIdFromAuth();
-            Account account = null;
+            Account? account = null;
 
             if (accountId > 0)
                 account = db.Accounts.FirstOrDefault(a => a.Id == accountId);
@@ -169,7 +169,7 @@ namespace RetroRec_Server.Controllers
             using var db = new RetroRecDb();
 
             int accountId = GetAccountIdFromAuth();
-            Account account = null;
+            Account? account = null;
 
             if (accountId > 0)
                 account = db.Accounts.FirstOrDefault(a => a.Id == accountId);

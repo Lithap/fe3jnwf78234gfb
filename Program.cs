@@ -37,7 +37,6 @@ app.UseForwardedHeaders();
 // follow up with CREATE TABLE IF NOT EXISTS for every new table we add
 // after the initial schema. This is idempotent and works for both fresh
 // installs and existing DBs without needing EF migrations infrastructure.
-using (var scope = app.Services.CreateScope())
 {
     using var db = new RetroRecDb();
     db.Database.EnsureCreated();

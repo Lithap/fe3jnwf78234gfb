@@ -73,7 +73,7 @@ namespace RetroRec_Server.Controllers
                     MicSpamWarningStateVolumeMultiplier = 0
                 }
             };
-            return JsonSerializer.Serialize(payload, PascalOpts);
+            return JsonSerializer.Serialize(payload, SerializerOptions.Pascal);
         }
 
         [HttpGet("/api/config/v2")]

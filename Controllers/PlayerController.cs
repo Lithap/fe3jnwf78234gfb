@@ -46,7 +46,7 @@ namespace RetroRec_Server.Controllers
             return 0;
         }
 
-        private CheerSummary BuildCheerSummary(RetroRecDb db, long accountId)
+        private static CheerSummary BuildCheerSummary(RetroRecDb db, long accountId)
         {
             var cheers = db.PlayerCheers
                 .Where(c => c.TargetAccountId == accountId)
@@ -78,7 +78,7 @@ namespace RetroRec_Server.Controllers
             return summary;
         }
 
-        private object ReputationPayload(CheerSummary summary) => new
+        private static object ReputationPayload(CheerSummary summary) => new
         {
             summary.AccountId,
             summary.IsCheerful,
@@ -349,8 +349,6 @@ namespace RetroRec_Server.Controllers
             return Pascal(ReputationPayload(summary));
         }
 
-        [HttpPost("/api/PlayerCheer/v1/create")]
-        [HttpPost("/PlayerCheer/v1/create")]
         [HttpPost("/api/playercheer/v1/create")]
         [HttpPost("/playercheer/v1/create")]
         public async Task<IActionResult> CreatePlayerCheer()
