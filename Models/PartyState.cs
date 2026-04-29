@@ -30,38 +30,59 @@ namespace RetroRec_Server.Controllers
         // key = inviteId
         public static readonly ConcurrentDictionary<string, InviteData> Invites = new();
 
+        private static readonly object _inviteLock = new();
+
         // Reuse an outstanding invite between the same two players instead of
         // stacking stale follow prompts for each room hop. The newest room info
         // always wins, which matches how the client expects "follow me" invites
         // to behave when a party leader keeps moving.
+        //
+        // The lock makes the find-or-create atomic and doubles as the eviction
+        // point for expired invites so the dictionary doesn't grow unboundedly.
         public static string UpsertInvite(int senderId, int targetId, string? roomName, int roomId, bool isPartyInvite)
         {
-            var existing = Invites.FirstOrDefault(kv =>
-                kv.Value.SenderId == senderId &&
-                kv.Value.TargetId == targetId &&
-                kv.Value.IsPartyInvite == isPartyInvite);
-
-            var now = DateTime.UtcNow;
-            if (!string.IsNullOrEmpty(existing.Key))
+            lock (_inviteLock)
             {
-                existing.Value.RoomName = roomName;
-                existing.Value.RoomId = roomId;
-                existing.Value.CreatedAt = now;
-                return existing.Key;
+                var now = DateTime.UtcNow;
+                var expiryCutoff = now.AddMinutes(-5);
+
+                string? existingKey = null;
+                foreach (var kv in Invites)
+                {
+                    if (kv.Value.CreatedAt < expiryCutoff)
+                    {
+                        Invites.TryRemove(kv.Key, out _);
+                        continue;
+                    }
+                    if (kv.Value.SenderId == senderId &&
+                        kv.Value.TargetId == targetId &&
+                        kv.Value.IsPartyInvite == isPartyInvite)
+                    {
+                        existingKey = kv.Key;
+                    }
+                }
+
+                if (existingKey != null && Invites.TryGetValue(existingKey, out var existing))
+                {
+                    existing.RoomName = roomName;
+                    existing.RoomId = roomId;
+                    existing.CreatedAt = now;
+                    return existingKey;
+                }
+
+                var inviteId = $"inv_{senderId}_{targetId}_{DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}_{Guid.NewGuid():N}";
+                Invites[inviteId] = new InviteData
+                {
+                    InviteId = inviteId,
+                    SenderId = senderId,
+                    TargetId = targetId,
+                    RoomName = roomName,
+                    RoomId = roomId,
+                    IsPartyInvite = isPartyInvite,
+                    CreatedAt = now
+                };
+                return inviteId;
             }
-
-            var inviteId = $"inv_{senderId}_{targetId}_{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
-            Invites[inviteId] = new InviteData
-            {
-                InviteId = inviteId,
-                SenderId = senderId,
-                TargetId = targetId,
-                RoomName = roomName,
-                RoomId = roomId,
-                IsPartyInvite = isPartyInvite,
-                CreatedAt = now
-            };
-            return inviteId;
         }
     }
 }

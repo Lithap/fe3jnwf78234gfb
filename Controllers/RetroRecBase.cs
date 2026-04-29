@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -24,6 +25,15 @@ namespace RetroRec_Server.Controllers
         // the short name PascalOpts without qualifying it.
         internal static readonly JsonSerializerOptions PascalOpts = SerializerOptions.Pascal;
 
+        // HMAC-SHA256 key used to sign and verify JWTs. Loaded from JWT_SECRET
+        // env var so operators can keep tokens valid across restarts; falls back
+        // to a random key so the server still works out-of-the-box (tokens just
+        // expire on restart).
+        internal static readonly byte[] JwtSecret = string.IsNullOrEmpty(
+            Environment.GetEnvironmentVariable("JWT_SECRET"))
+            ? RandomNumberGenerator.GetBytes(32)
+            : Encoding.UTF8.GetBytes(Environment.GetEnvironmentVariable("JWT_SECRET")!);
+
         // Per-user room instance state. Used by Player + Rooms controllers
         // to keep each player's "where am I" state independent. Without
         // per-user tracking, two players overwrite each other and the client
@@ -31,9 +41,8 @@ namespace RetroRec_Server.Controllers
         public static readonly System.Collections.Concurrent.ConcurrentDictionary<int, object>
             UserRoomInstances = new();
 
-        // Pulls the "sub" claim (account id) out of the Bearer JWT so endpoints
-        // know which user is calling them, instead of hardcoding playerId = 2.
-        // Same logic AuthController uses to produce the JWT in the first place.
+        // Pulls the "sub" claim (account id) out of the Bearer JWT, verifying
+        // the HMAC-SHA256 signature before trusting any claim in the payload.
         protected int GetAccountIdFromAuth()
         {
             try
@@ -42,14 +51,28 @@ namespace RetroRec_Server.Controllers
                 if (string.IsNullOrEmpty(auth)) return 0;
                 var token = auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) ? auth[7..] : auth;
                 var parts = token.Split('.');
-                if (parts.Length < 2) return 0;
-                var payload = parts[1].Replace('-', '+').Replace('_', '/');
-                switch (payload.Length % 4)
+                if (parts.Length != 3) return 0;
+
+                // Verify signature before reading any claims.
+                var signingInput = Encoding.UTF8.GetBytes(parts[0] + "." + parts[1]);
+                var expectedSig = HMACSHA256.HashData(JwtSecret, signingInput);
+                var actualSigPadded = parts[2].Replace('-', '+').Replace('_', '/');
+                switch (actualSigPadded.Length % 4)
                 {
-                    case 2: payload += "=="; break;
-                    case 3: payload += "="; break;
+                    case 2: actualSigPadded += "=="; break;
+                    case 3: actualSigPadded += "="; break;
                 }
-                var json = Encoding.UTF8.GetString(Convert.FromBase64String(payload));
+                if (!CryptographicOperations.FixedTimeEquals(
+                        expectedSig, Convert.FromBase64String(actualSigPadded)))
+                    return 0;
+
+                var payloadPadded = parts[1].Replace('-', '+').Replace('_', '/');
+                switch (payloadPadded.Length % 4)
+                {
+                    case 2: payloadPadded += "=="; break;
+                    case 3: payloadPadded += "="; break;
+                }
+                var json = Encoding.UTF8.GetString(Convert.FromBase64String(payloadPadded));
                 var match = System.Text.RegularExpressions.Regex.Match(
                     json, "\"sub\"\\s*:\\s*\"?(\\d+)\"?");
                 if (match.Success && int.TryParse(match.Groups[1].Value, out var id))
