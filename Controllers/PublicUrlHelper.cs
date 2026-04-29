@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Http;
 
+namespace RetroRec_Server.Controllers;
+
 /// <summary>
 /// Builds the base URL the game should use for API/WebSocket calls. When the
 /// server sits behind ngrok or another reverse proxy, forwarded headers carry
@@ -19,7 +21,6 @@ public static class PublicUrlHelper
             return $"{scheme}://{forwardedHost.Trim()}";
         }
 
-        // Direct hit (e.g. localhost:2059) — no forwarded host.
         return $"{request.Scheme}://{request.Host.Value}";
     }
 

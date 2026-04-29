@@ -17,22 +17,22 @@ namespace RetroRec_Server.Controllers
             {
                 Id = 2,
                 TitleOverride = "You!",
-                UrlOverride = (string)null
+                UrlOverride = (string?)null
             },
             FeaturedRoomGroup = new
             {
                 FeaturedRoomGroupId = 0,
                 Name = "Get Started",
-                Rooms = new object[] { },
-                FeaturedRooms = new object[] { }
+                Rooms = Array.Empty<object>(),
+                FeaturedRooms = Array.Empty<object>()
             },
             CurrentAnnouncement = new
             {
                 Message = "Welcome to RetroRec!",
-                MoreInfoUrl = (string)null
+                MoreInfoUrl = (string?)null
             },
-            InstagramImages = (object)null,
-            Videos = (object)null
+            InstagramImages = (object?)null,
+            Videos = (object?)null
         });
 
         [HttpGet("/api/images/v2/named")]
@@ -85,16 +85,16 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/api/storefronts/v4/balance/{id}")]
         [HttpGet("/api/storefronts/v3/giftdropstore/{id}")]
         [HttpGet("/api/storefronts/v3/balance/{id}")]
-        public IActionResult StoreFronts() => NoContent();
+        public IActionResult StoreFronts(long _id = 0) => NoContent();
 
         [HttpGet("/api/storefronts/v1/balanceAddType/{id}/{type}")]
-        public IActionResult BalanceAddType(long id, int type) => Ok(new { });
+        public IActionResult BalanceAddType(long _id = 0, int _type = 0) => Ok(new { });
 
         [HttpGet("/api/messages/v1/favoriteFriendOnlineStatus")]
-        public IActionResult FriendStatus() => Ok(new object[] { });
+        public IActionResult FriendStatus() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/messages/v2/get")]
-        public IActionResult MessagesGet() => Ok(new object[] { });
+        public IActionResult MessagesGet() => Ok(Array.Empty<object>());
 
         // Text chat moderation / filter — client POSTs the outgoing message and
         // expects 200 + JSON with a purified string. Without this, requests hit
@@ -149,7 +149,7 @@ namespace RetroRec_Server.Controllers
         }
 
         [HttpGet("/thread")]
-        public IActionResult Thread() => Ok(new object[] { });
+        public IActionResult Thread() => Ok(Array.Empty<object>());
 
         [HttpGet("/club/home/me")]
         public IActionResult ClubHome() => NoContent();
@@ -171,7 +171,7 @@ namespace RetroRec_Server.Controllers
         {
             int playerId = GetAccountIdFromAuth();
             if (playerId == 0) playerId = 2;
-            RetroRecBase.UserRoomInstances.TryGetValue(playerId, out var roomInstance);
+            UserRoomInstances.TryGetValue(playerId, out var roomInstance);
             return Pascal(new
             {
                 PlayerId = playerId,
@@ -196,15 +196,11 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/notification/v2")]
         [HttpGet("/api/notification/v1")]
         [HttpGet("/notification/v1")]
-        public IActionResult Notifications() => Ok(new object[] { });
-
-        [HttpGet("/api/playerevents/v1/all")]
-        [HttpGet("/playerevents/v1/all")]
-        public IActionResult PlayerEvents() => Pascal(new { Created = new object[] { }, Responses = new object[] { } });
+        public IActionResult Notifications() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/playersubscriptions/v1/my")]
         [HttpGet("/playersubscriptions/v1/my")]
-        public IActionResult PlayerSubscriptions() => Ok(new object[] { });
+        public IActionResult PlayerSubscriptions() => Ok(Array.Empty<object>());
 
         // ============ CHAT ============
 
@@ -220,7 +216,7 @@ namespace RetroRec_Server.Controllers
         [HttpGet("/chat/v2/myChats")]
         [HttpGet("/api/chat/v1/myChats")]
         [HttpGet("/chat/v1/myChats")]
-        public IActionResult MyChats() => Ok(new object[] { });
+        public IActionResult MyChats() => Ok(Array.Empty<object>());
 
         // ============ CHECKLIST / CHALLENGES ============
 
@@ -247,7 +243,7 @@ namespace RetroRec_Server.Controllers
         // parameter will match anything single-segment, so any specific
         // route in the other controllers takes priority.
         [HttpGet("/{imageName}")]
-        public IActionResult ImageCatchall(string imageName)
+        public IActionResult ImageCatchall(string? imageName = null)
         {
             return File(RRConstants.PlaceholderPng, "image/png");
         }

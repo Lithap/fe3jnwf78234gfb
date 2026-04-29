@@ -1,40 +1,40 @@
 using Microsoft.AspNetCore.Mvc;
 
-[ApiController]
-public class NameServerController : ControllerBase
+namespace RetroRec_Server.Controllers
 {
-    [HttpGet("/2")]
-    public IActionResult NameServer()
+    [ApiController]
+    public class NameServerController : RetroRecBase
     {
-        string url = PublicUrlHelper.GetPublicBaseUrl(Request);
+        [HttpGet("/2")]
+        public IActionResult NameServer()
+        {
+            string url = PublicUrlHelper.GetPublicBaseUrl(Request);
 
-        return new JsonResult(new
-        {
-            Auth = url,
-            API = url,
-            WWW = url,
-            Notifications = url,
-            Images = url,
-            CDN = url,
-            Commerce = url,
-            Matchmaking = url,
-            Storage = url,
-            Chat = url,
-            Leaderboard = url,
-            Accounts = url,
-            Link = url,
-            RoomComments = url,
-            Clubs = url,
-            Rooms = url,
-            PlatformNotifications = url,
-            Moderation = url,
-            DataCollection = url
-        })
-        {
-            SerializerSettings = new System.Text.Json.JsonSerializerOptions
+            return new JsonResult(new
             {
-                PropertyNamingPolicy = null
-            }
-        };
+                Auth = url,
+                API = url,
+                WWW = url,
+                Notifications = url,
+                Images = url,
+                CDN = url,
+                Commerce = url,
+                Matchmaking = url,
+                Storage = url,
+                Chat = url,
+                Leaderboard = url,
+                Accounts = url,
+                Link = url,
+                RoomComments = url,
+                Clubs = url,
+                Rooms = url,
+                PlatformNotifications = url,
+                Moderation = url,
+                DataCollection = url
+            })
+            {
+                SerializerSettings = PascalOpts
+            };
+        }
     }
 }

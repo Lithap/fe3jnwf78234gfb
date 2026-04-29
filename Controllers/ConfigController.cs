@@ -1,5 +1,5 @@
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 
 namespace RetroRec_Server.Controllers
 {
@@ -23,44 +23,57 @@ namespace RetroRec_Server.Controllers
         {
             var baseWithSlash = PublicUrlHelper.GetPublicBaseUrlWithTrailingSlash(request);
             var baseNoSlash = baseWithSlash.TrimEnd('/');
-            return $@"{{
-  ""MessageOfTheDay"": ""Welcome to RetroRec! Be excellent to each other!"",
-  ""CdnBaseUri"": ""{baseWithSlash.Replace("\"", "\\\"")}"",
-  ""ShareBaseUrl"": ""{baseNoSlash.Replace("\"", "\\\"")}/{{0}}"",
-  ""LevelProgressionMaps"": [],
-  ""MatchmakingParams"": {
-    ""PreferFullRoomsFrequency"": 1,
-    ""PreferEmptyRoomsFrequency"": 0
-  },
-  ""DailyObjectives"": [
-    [ { ""type"": 21, ""score"": 1, ""xp"": 0 }, { ""type"": 802, ""score"": 3, ""xp"": 0 }, { ""type"": 100, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 502, ""score"": 5, ""xp"": 0 }, { ""type"": 400, ""score"": 3, ""xp"": 0 }, { ""type"": 101, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 301, ""score"": 3, ""xp"": 0 }, { ""type"": 202, ""score"": 4, ""xp"": 0 }, { ""type"": 603, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 21, ""score"": 1, ""xp"": 0 }, { ""type"": 802, ""score"": 3, ""xp"": 0 }, { ""type"": 100, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 502, ""score"": 5, ""xp"": 0 }, { ""type"": 400, ""score"": 3, ""xp"": 0 }, { ""type"": 101, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 301, ""score"": 3, ""xp"": 0 }, { ""type"": 202, ""score"": 4, ""xp"": 0 }, { ""type"": 603, ""score"": 2, ""xp"": 0 } ],
-    [ { ""type"": 302, ""score"": 3, ""xp"": 0 }, { ""type"": 401, ""score"": 2, ""xp"": 0 }, { ""type"": 800, ""score"": 1, ""xp"": 0 } ]
-  ],
-  ""ConfigTable"": [
-    { ""Key"": ""Gift.DropChance"", ""Value"": ""0.5"" },
-    { ""Key"": ""Gift.XP"", ""Value"": ""0.5"" }
-  ],
-  ""PhotonConfig"": {
-    ""CloudRegion"": ""us"",
-    ""CrcCheckEnabled"": false,
-    ""EnableServerTracingAfterDisconnect"": false
-  },
-  ""AutoMicMutingConfig"": {
-    ""MicSpamVolumeThreshold"": 0,
-    ""MicVolumeSampleInterval"": 0,
-    ""MicVolumeSampleRollingWindowLength"": 0,
-    ""MicSpamSamplePercentageForWarning"": 0,
-    ""MicSpamSamplePercentageForWarningToEnd"": 0,
-    ""MicSpamSamplePercentageForForceMute"": 0,
-    ""MicSpamSamplePercentageForForceMuteToEnd"": 0,
-    ""MicSpamWarningStateVolumeMultiplier"": 0
-  }
-}}";
+
+            // Build as an anonymous object so the compiler never sees ambiguous
+            // { } braces inside an interpolated string.
+            static object Obj(int type, int score, int xp) => new { type, score, xp };
+            static object Cfg(string key, string value) => new { Key = key, Value = value };
+
+            var payload = new
+            {
+                MessageOfTheDay = "Welcome to RetroRec! Be excellent to each other!",
+                CdnBaseUri = baseWithSlash,
+                ShareBaseUrl = baseNoSlash + "/{0}",
+                LevelProgressionMaps = Array.Empty<object>(),
+                MatchmakingParams = new
+                {
+                    PreferFullRoomsFrequency = 1,
+                    PreferEmptyRoomsFrequency = 0
+                },
+                DailyObjectives = new object[]
+                {
+                    new object[] { Obj(21, 1, 0),  Obj(802, 3, 0), Obj(100, 2, 0) },
+                    new object[] { Obj(502, 5, 0), Obj(400, 3, 0), Obj(101, 2, 0) },
+                    new object[] { Obj(301, 3, 0), Obj(202, 4, 0), Obj(603, 2, 0) },
+                    new object[] { Obj(21, 1, 0),  Obj(802, 3, 0), Obj(100, 2, 0) },
+                    new object[] { Obj(502, 5, 0), Obj(400, 3, 0), Obj(101, 2, 0) },
+                    new object[] { Obj(301, 3, 0), Obj(202, 4, 0), Obj(603, 2, 0) },
+                    new object[] { Obj(302, 3, 0), Obj(401, 2, 0), Obj(800, 1, 0) }
+                },
+                ConfigTable = new object[]
+                {
+                    Cfg("Gift.DropChance", "0.5"),
+                    Cfg("Gift.XP", "0.5")
+                },
+                PhotonConfig = new
+                {
+                    CloudRegion = "us",
+                    CrcCheckEnabled = false,
+                    EnableServerTracingAfterDisconnect = false
+                },
+                AutoMicMutingConfig = new
+                {
+                    MicSpamVolumeThreshold = 0,
+                    MicVolumeSampleInterval = 0,
+                    MicVolumeSampleRollingWindowLength = 0,
+                    MicSpamSamplePercentageForWarning = 0,
+                    MicSpamSamplePercentageForWarningToEnd = 0,
+                    MicSpamSamplePercentageForForceMute = 0,
+                    MicSpamSamplePercentageForForceMuteToEnd = 0,
+                    MicSpamWarningStateVolumeMultiplier = 0
+                }
+            };
+            return JsonSerializer.Serialize(payload, PascalOpts);
         }
 
         [HttpGet("/api/config/v2")]
@@ -72,27 +85,27 @@ namespace RetroRec_Server.Controllers
         // entries here as new "GameConfig not found:" warnings appear in logs.
         [HttpGet("/api/gameconfigs/v1/all")]
         public IActionResult GameConfigs() => Ok(new object[] {
-            new { Key = "Gift.MaxDaily", Value = "100", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Gift.Falloff", Value = "1", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Gift.DropChance", Value = "100", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "UseHeartbeatWebSocket", Value = "0", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Screens.ForceVerification", Value = "0", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "forceRegistration", Value = "0", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Creative.Query", Value = "#puzzle", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Creative.Title", Value = "PUZZLE", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Featured.Query", Value = "#featured", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Featured.Title", Value = "Featured", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Quests.Query", Value = "#quest", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Quests.Title", Value = "QUESTS", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Shooters.Query", Value = "#pvp", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Shooters.Title", Value = "PVP", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Sports.Query", Value = "#sport", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Door.Sports.Title", Value = "SPORTS & REC", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "UGC.Persistence.AutosaveIntervalSeconds", Value = "60", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "UGC.RoomSavingEnabled", Value = "1", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "UGC.MaxChipsVisible", Value = "5000", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "Rewards.UseRewardSelection", Value = "0", StartTime = (string)null, EndTime = (string)null },
-            new { Key = "ClickOnName.MaxRaycastDistance", Value = "5", StartTime = (string)null, EndTime = (string)null }
+            new { Key = "Gift.MaxDaily", Value = "100", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Gift.Falloff", Value = "1", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Gift.DropChance", Value = "100", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "UseHeartbeatWebSocket", Value = "0", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Screens.ForceVerification", Value = "0", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "forceRegistration", Value = "0", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Creative.Query", Value = "#puzzle", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Creative.Title", Value = "PUZZLE", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Featured.Query", Value = "#featured", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Featured.Title", Value = "Featured", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Quests.Query", Value = "#quest", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Quests.Title", Value = "QUESTS", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Shooters.Query", Value = "#pvp", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Shooters.Title", Value = "PVP", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Sports.Query", Value = "#sport", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Door.Sports.Title", Value = "SPORTS & REC", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "UGC.Persistence.AutosaveIntervalSeconds", Value = "60", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "UGC.RoomSavingEnabled", Value = "1", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "UGC.MaxChipsVisible", Value = "5000", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "Rewards.UseRewardSelection", Value = "0", StartTime = (string?)null, EndTime = (string?)null },
+            new { Key = "ClickOnName.MaxRaycastDistance", Value = "5", StartTime = (string?)null, EndTime = (string?)null }
         });
 
         [HttpGet("/api/config/v1/amplitude")]
@@ -103,19 +116,19 @@ namespace RetroRec_Server.Controllers
         // so we catch everything with a wildcard suffix.
         [HttpGet("/api/versioncheck/{*rest}")]
         [HttpGet("/versioncheck/{*rest}")]
-        public IActionResult VersionCheck(string rest = "") => Ok(new { ValidVersion = true, VersionStatus = 0 });
+        public IActionResult VersionCheck(string? rest = null) => Ok(new { ValidVersion = true, VersionStatus = 0 });
 
         [HttpGet("/config/LoadingScreenTipData")]
-        public IActionResult LoadingTips() => Ok(new object[] { });
+        public IActionResult LoadingTips() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/announcement/v1/get")]
-        public IActionResult Announcement() => Ok(new object[] { });
+        public IActionResult Announcement() => Ok(Array.Empty<object>());
 
         [HttpGet("/announcements/v2/mine/unread")]
-        public IActionResult AnnouncementsUnread() => Ok(new object[] { });
+        public IActionResult AnnouncementsUnread() => Ok(Array.Empty<object>());
 
         [HttpGet("/announcements/v2/subscription/mine/unread")]
-        public IActionResult AnnouncementsSubscriptionUnread() => Ok(new object[] { });
+        public IActionResult AnnouncementsSubscriptionUnread() => Ok(Array.Empty<object>());
 
         // Per-user client settings (graphics, voice, comfort options, etc.)
         // Returning a populated list with sensible defaults stops the client

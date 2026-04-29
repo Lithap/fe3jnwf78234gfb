@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using RetroRec_Server.Models;
 
 namespace RetroRec_Server.Controllers
 {
@@ -261,11 +262,11 @@ namespace RetroRec_Server.Controllers
         public IActionResult StatusVis() => NoContent();
 
         [HttpGet("/player/save/{id}")]
-        public IActionResult PlayerSave(long id) => Ok(new { data = "" });
+        public IActionResult PlayerSave(long _id = 0) => Ok(new { data = "" });
 
         [HttpPost("/player/save/{id}")]
         [HttpPut("/player/save/{id}")]
-        public IActionResult SavePlayer(long id) => Ok(new { });
+        public IActionResult SavePlayer(long _id = 0) => Ok(new { });
 
         // ============ PROGRESSION ============
 
@@ -418,7 +419,7 @@ namespace RetroRec_Server.Controllers
         });
 
         [HttpGet("/api/PlayerReporting/v1/voteToKickReasons")]
-        public IActionResult VoteKickReasons() => Ok(new object[] { });
+        public IActionResult VoteKickReasons() => Ok(Array.Empty<object>());
 
         [HttpPost("/api/PlayerReporting/v1/hile")]
         public IActionResult Hile() => NoContent();
@@ -546,10 +547,10 @@ namespace RetroRec_Server.Controllers
 
         [HttpGet("/showcase/{id}")]
         [HttpGet("/api/showcase/{id}")]
-        public IActionResult Showcase(long id) => Ok(new object[] { });
+        public IActionResult Showcase(long _id = 0) => Ok(Array.Empty<object>());
 
         [HttpGet("/subscription/mine/member")]
-        public IActionResult SubscriptionMine() => Ok(new object[] { });
+        public IActionResult SubscriptionMine() => Ok(Array.Empty<object>());
 
         [HttpGet("/subscription/subscriberCount/{id}")]
         [HttpGet("/api/subscription/subscriberCount/{id}")]
@@ -580,15 +581,15 @@ namespace RetroRec_Server.Controllers
         // HTTP Error 404" spams the log. We don't have account data for arbitrary
         // Steam IDs so just return an empty list — the client handles it gracefully.
         [HttpPost("/cachedlogin/forplatformids")]
-        public IActionResult CachedLoginForPlatformIds() => Ok(new object[] { });
+        public IActionResult CachedLoginForPlatformIds() => Ok(Array.Empty<object>());
 
         // ============ RELATIONSHIPS ============
 
         [HttpPost("/api/relationships/v1/bulkignoreplatformusers")]
-        public IActionResult BulkIgnore() => Ok(new object[] { });
+        public IActionResult BulkIgnore() => Ok(Array.Empty<object>());
 
         [HttpGet("/api/externalfriendinvite/v1/getplatformreferrers")]
-        public IActionResult PlatformReferrers() => Ok(new object[] { });
+        public IActionResult PlatformReferrers() => Ok(Array.Empty<object>());
 
         // Returns the caller's relationships with correct directional types:
         //   type 2 = I sent a request to them (pending outgoing)
@@ -858,12 +859,12 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/api/relationships/v2/block")]
         [HttpGet("/relationships/v2/block")]
         [HttpPost("/relationships/v2/block")]
-        public IActionResult BlockPlayer([FromQuery] int id) => Ok(new { });
+        public IActionResult BlockPlayer([FromQuery] int _id = 0) => Ok(new { });
 
         [HttpGet("/api/relationships/v2/unblock")]
         [HttpPost("/api/relationships/v2/unblock")]
         [HttpGet("/relationships/v2/unblock")]
         [HttpPost("/relationships/v2/unblock")]
-        public IActionResult UnblockPlayer([FromQuery] int id) => Ok(new { });
+        public IActionResult UnblockPlayer([FromQuery] int _id = 0) => Ok(new { });
     }
 }

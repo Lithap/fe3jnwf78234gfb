@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.EntityFrameworkCore;
+using RetroRec_Server;
+using RetroRec_Server.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();

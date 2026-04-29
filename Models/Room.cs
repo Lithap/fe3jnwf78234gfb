@@ -1,3 +1,5 @@
+namespace RetroRec_Server.Models;
+
 public class Room
 {
     public int Id { get; set; }

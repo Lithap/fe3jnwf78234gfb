@@ -13,7 +13,7 @@ namespace RetroRec_Server.Controllers
         [HttpPost("/matchmaking/{**path}")]
         [HttpPut("/matchmaking/{**path}")]
         [HttpDelete("/matchmaking/{**path}")]
-        public IActionResult Matchmaking(string path)
+        public IActionResult Matchmaking(string? _path = null)
         {
             Console.WriteLine($"[matchmaking] {Request.Method} {Request.Path}{Request.QueryString}");
             return Ok(new { });

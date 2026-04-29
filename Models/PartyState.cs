@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Linq;
 
+// PartyState lives in Models/ but keeps the Controllers namespace so it is
+// accessible from all controllers without an extra using directive.
 namespace RetroRec_Server.Controllers
 {
     // Centralized in-memory state for the whole server.
@@ -18,8 +20,9 @@ namespace RetroRec_Server.Controllers
         public static readonly ConcurrentDictionary<(int, int), object> RoomInstancesByRoom = new();
 
         // Monotonic room instance ID counter, seeded from clock so restarts
-        // never reuse IDs from a previous run.
-        public static int NextRoomInstanceId = (int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF);
+        // never reuse IDs from a previous run. Marked volatile so reads in
+        // other threads see the latest Interlocked.Increment result.
+        public static volatile int NextRoomInstanceId = (int)(DateTime.UtcNow.Ticks & 0x7FFFFFFF);
 
         // key = memberId, value = partyLeaderId
         public static readonly ConcurrentDictionary<int, int> MemberOf = new();

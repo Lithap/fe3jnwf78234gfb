@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Text;
+using RetroRec_Server.Models;
 
 namespace RetroRec_Server.Controllers
 {
@@ -101,7 +102,7 @@ namespace RetroRec_Server.Controllers
                 refresh_token = jwt,
                 key = "",
                 Account = BuildAccountJson(account)
-            }, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = null });
+            }, PascalOpts);
             return Content(responseJson, "application/json");
         }
 
@@ -120,7 +121,7 @@ namespace RetroRec_Server.Controllers
         public IActionResult AccountBulk([FromQuery(Name = "id")] int[] ids)
         {
             using var db = new RetroRecDb();
-            if (ids == null || ids.Length == 0) return Pascal(new object[] { });
+            if (ids == null || ids.Length == 0) return Pascal(Array.Empty<object>());
 
             var distinct = ids.Where(i => i > 0).Distinct().ToList();
             var accounts = db.Accounts
@@ -152,7 +153,7 @@ namespace RetroRec_Server.Controllers
                         Username = $"Player{id}",
                         Level = 0,
                         XP = 0,
-                        PlatformTags = new object[] { }
+                        PlatformTags = Array.Empty<object>()
                     });
                 }
             }
@@ -204,7 +205,7 @@ namespace RetroRec_Server.Controllers
                     Username = $"Player{id}",
                     Level = 0,
                     XP = 0,
-                    PlatformTags = new object[] { }
+                    PlatformTags = Array.Empty<object>()
                 });
             }
             return Pascal(BuildAccountJson(account));
@@ -219,7 +220,7 @@ namespace RetroRec_Server.Controllers
         public IActionResult AccountBulkByUsername([FromQuery(Name = "username")] string[] usernames)
         {
             using var db = new RetroRecDb();
-            if (usernames == null || usernames.Length == 0) return Pascal(new object[] { });
+            if (usernames == null || usernames.Length == 0) return Pascal(Array.Empty<object>());
 
             // Friend search can send different casing than the stored username.
             // Normalize both sides so "myFriend" and "MYFRIEND" resolve equally.
@@ -408,7 +409,7 @@ namespace RetroRec_Server.Controllers
                     AccountId = account.Id,
                     LastLoginTime = "0001-01-01T00:00:00"
                 }
-            }, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = null });
+            }, PascalOpts);
             return Content(json, "application/json");
         }
 
@@ -442,7 +443,7 @@ namespace RetroRec_Server.Controllers
                     AccountId = account.Id,
                     LastLoginTime = "0001-01-01T00:00:00"
                 }
-            }, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = null });
+            }, PascalOpts);
             return Content(json, "application/json");
         }
 
@@ -481,7 +482,7 @@ namespace RetroRec_Server.Controllers
         // and create duplicate rows. Cheap because we only hold the lock
         // long enough to do a re-check + insert; existing accounts skip
         // the lock entirely.
-        private static readonly object _accountCreateLock = new();
+        private static readonly Lock _accountCreateLock = new();
 
         // One Steam id (or other platform id) = one account, period. Both
         // /connect/token and /cachedlogin/forplatformid go through this so
@@ -578,7 +579,7 @@ namespace RetroRec_Server.Controllers
                 Level = a.Level,
                 XP = a.XP,
                 CanReceiveInvites = true,
-                PlatformTags = new object[] { }
+                PlatformTags = Array.Empty<object>()
             };
         }
 

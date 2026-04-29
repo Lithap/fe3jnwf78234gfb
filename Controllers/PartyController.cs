@@ -40,7 +40,7 @@ namespace RetroRec_Server.Controllers
         // makes party invites work consistently instead of "sometimes".
         private (int targetId, string roomName, int roomId) ReadInviteFields(Dictionary<string, string> form)
         {
-            string targetStr = null, roomName = null, roomIdStr = null;
+            string? targetStr = null, roomName = null, roomIdStr = null;
 
             if (form != null)
             {
@@ -82,7 +82,7 @@ namespace RetroRec_Server.Controllers
                             if (doc.RootElement.TryGetProperty(key, out var el))
                             {
                                 if (el.ValueKind == System.Text.Json.JsonValueKind.Number) targetStr = el.GetRawText();
-                                else if (el.ValueKind == System.Text.Json.JsonValueKind.String) targetStr = el.GetString();
+                                else if (el.ValueKind == System.Text.Json.JsonValueKind.String) targetStr = el.GetString() ?? "";
                                 if (!string.IsNullOrEmpty(targetStr)) break;
                             }
                         }
@@ -91,7 +91,7 @@ namespace RetroRec_Server.Controllers
                             if (string.IsNullOrEmpty(roomName) &&
                                 doc.RootElement.TryGetProperty(key, out var el) &&
                                 el.ValueKind == System.Text.Json.JsonValueKind.String)
-                                roomName = el.GetString();
+                                roomName = el.GetString() ?? "";
                         }
                         foreach (var key in new[] { "roomId", "RoomId" })
                         {
@@ -100,7 +100,7 @@ namespace RetroRec_Server.Controllers
                             {
                                 roomIdStr = el.ValueKind == System.Text.Json.JsonValueKind.Number
                                     ? el.GetRawText()
-                                    : el.GetString();
+                                    : (el.GetString() ?? "");
                             }
                         }
                     }
@@ -233,7 +233,7 @@ namespace RetroRec_Server.Controllers
                 return Pascal(new { LeaderId = myId, Members = myMembers });
 
             // Not in any party — return empty so the client clears the panel.
-            return Pascal(new { LeaderId = 0, Members = new object[] { } });
+            return Pascal(new { LeaderId = 0, Members = Array.Empty<object>() });
         }
     }
 
