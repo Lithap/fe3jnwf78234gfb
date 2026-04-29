@@ -14,7 +14,7 @@ namespace RetroRec_Server.Controllers
         public IActionResult GetInvites()
         {
             int myId = GetAccountIdFromAuth();
-            if (myId == 0) myId = 2;
+            if (myId == 0) return Unauthorized();
             var pending = PartyState.Invites.Values
                 .Where(i => i.TargetId == myId)
                 // Drop expired invites so stale "X wants to go with you"
@@ -120,7 +120,7 @@ namespace RetroRec_Server.Controllers
         public IActionResult SendInvite([FromForm] Dictionary<string, string> form)
         {
             int myId = GetAccountIdFromAuth();
-            if (myId == 0) myId = 2;
+            if (myId == 0) return Unauthorized();
 
             var (targetId, roomName, roomIdParsed) = ReadInviteFields(form);
 
@@ -164,10 +164,15 @@ namespace RetroRec_Server.Controllers
         public IActionResult AcceptInvite(string inviteId)
         {
             int myId = GetAccountIdFromAuth();
-            if (myId == 0) myId = 2;
+            if (myId == 0) return Unauthorized();
 
-            if (!PartyState.Invites.TryRemove(inviteId, out var invite))
+            if (!PartyState.Invites.TryGetValue(inviteId, out var invite))
                 return Pascal(new { ErrorCode = 0 });
+
+            if (invite.TargetId != myId)
+                return StatusCode(403, new { ErrorCode = 403, Error = "not_your_invite" });
+
+            PartyState.Invites.TryRemove(inviteId, out _);
 
             if (invite.IsPartyInvite)
                 PartyState.MemberOf[myId] = invite.SenderId;
@@ -203,7 +208,7 @@ namespace RetroRec_Server.Controllers
         public async Task<IActionResult> BulkInvite()
         {
             int myId = GetAccountIdFromAuth();
-            if (myId == 0) myId = 2;
+            if (myId == 0) return Unauthorized();
 
             long playerEventId = 0;
             List<int>? invitedPlayerIds = null;
@@ -295,7 +300,7 @@ namespace RetroRec_Server.Controllers
         public IActionResult LeaveParty()
         {
             int myId = GetAccountIdFromAuth();
-            if (myId == 0) myId = 2;
+            if (myId == 0) return Unauthorized();
 
             if (PartyState.MemberOf.TryRemove(myId, out _))
             {
@@ -327,7 +332,7 @@ namespace RetroRec_Server.Controllers
         public IActionResult GetParty()
         {
             int myId = GetAccountIdFromAuth();
-            if (myId == 0) myId = 2;
+            if (myId == 0) return Unauthorized();
 
             // Am I a member of someone else's party?
             if (PartyState.MemberOf.TryGetValue(myId, out var leaderId))

@@ -901,7 +901,7 @@ namespace RetroRec_Server.Controllers
             }
 
             int playerId = GetAccountIdFromAuth();
-            if (playerId == 0) playerId = 2;
+            if (playerId == 0) return Unauthorized();
             UserRoomInstances[playerId] = roomInstance;
 
             foreach (var kvp in PartyState.MemberOf.Where(m => m.Value == playerId))

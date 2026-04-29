@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Cryptography;
 using System.Text;
 using RetroRec_Server.Models;
 
@@ -584,17 +585,18 @@ namespace RetroRec_Server.Controllers
         }
 
 
-        // Produces a fake 3-segment JWT that at least PARSES as base64.
-        // Client doesn't verify the signature, just decodes the payload.
+        // Produces a signed JWT using HMAC-SHA256. The server verifies this
+        // signature in GetAccountIdFromAuth() before trusting any claim.
         private static string MakeFakeJwt(int accountId)
         {
-            string B64(string s) =>
-                Convert.ToBase64String(Encoding.UTF8.GetBytes(s))
-                       .TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            string B64(byte[] bytes) =>
+                Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+            string B64Str(string s) => B64(Encoding.UTF8.GetBytes(s));
 
-            var header = B64("{\"alg\":\"RS256\",\"typ\":\"at+jwt\"}");
-            var payload = B64($"{{\"sub\":\"{accountId}\",\"iss\":\"https://auth.rec.net\",\"role\":\"webClient\"}}");
-            var sig = B64("signature");
+            var header = B64Str("{\"alg\":\"HS256\",\"typ\":\"at+jwt\"}");
+            var payload = B64Str($"{{\"sub\":\"{accountId}\",\"iss\":\"https://auth.rec.net\",\"role\":\"webClient\"}}");
+            var signingInput = Encoding.UTF8.GetBytes($"{header}.{payload}");
+            var sig = B64(HMACSHA256.HashData(JwtSecret, signingInput));
             return $"{header}.{payload}.{sig}";
         }
     }
