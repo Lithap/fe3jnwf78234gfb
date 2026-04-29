@@ -192,6 +192,102 @@ namespace RetroRec_Server.Controllers
             return Pascal(new { ErrorCode = 0 });
         }
 
+        // Bulk invite: one call invites multiple players at once.
+        // The client sends { PlayerEventId, InvitedPlayerIds: [int, ...] }.
+        // PlayerEventId maps to a room; if we don't recognise it we fall back
+        // to the sender's current room just like the single-invite path does.
+        [HttpPost("/api/invites/v1/bulk")]
+        [HttpPost("/api/invites/v1/bulk/")]
+        [HttpPost("/invites/v1/bulk")]
+        [HttpPost("/invites/v1/bulk/")]
+        public async Task<IActionResult> BulkInvite()
+        {
+            int myId = GetAccountIdFromAuth();
+            if (myId == 0) myId = 2;
+
+            long playerEventId = 0;
+            List<int>? invitedPlayerIds = null;
+
+            try
+            {
+                Request.EnableBuffering();
+                Request.Body.Position = 0;
+                using var reader = new StreamReader(Request.Body, leaveOpen: true);
+                var body = await reader.ReadToEndAsync();
+                Request.Body.Position = 0;
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    using var doc = System.Text.Json.JsonDocument.Parse(body);
+                    foreach (var key in new[] { "PlayerEventId", "playerEventId" })
+                    {
+                        if (doc.RootElement.TryGetProperty(key, out var el) &&
+                            el.ValueKind == System.Text.Json.JsonValueKind.Number)
+                        { playerEventId = el.GetInt64(); break; }
+                    }
+                    foreach (var key in new[] { "InvitedPlayerIds", "invitedPlayerIds" })
+                    {
+                        if (doc.RootElement.TryGetProperty(key, out var el) &&
+                            el.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        {
+                            invitedPlayerIds = new List<int>();
+                            foreach (var item in el.EnumerateArray())
+                                if (item.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                    invitedPlayerIds.Add(item.GetInt32());
+                            break;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            if (invitedPlayerIds == null || invitedPlayerIds.Count == 0)
+                return Pascal(new { ErrorCode = 1, Error = "missing_invited_player_ids" });
+
+            // Resolve the room from the sender's current presence; PlayerEventId
+            // is treated as a room id hint when we have it.
+            UserRoomInstances.TryGetValue(myId, out var myRoomObj);
+            var invRoomName = "DormRoom";
+            var invRoomId = 1;
+            if (myRoomObj != null)
+            {
+                try
+                {
+                    dynamic myRoom = myRoomObj;
+                    invRoomName = ((string)myRoom.Name).TrimStart('^');
+                    invRoomId = (int)myRoom.RoomId;
+                }
+                catch { }
+            }
+            if (playerEventId != 0)
+            {
+                var hintId = (int)(playerEventId & 0x7FFFFFFF);
+                if (RRConstants.RoomSceneIds.ContainsKey(hintId))
+                {
+                    invRoomId = hintId;
+                    invRoomName = RRConstants.RoomIdToName(hintId);
+                }
+            }
+
+            var results = invitedPlayerIds.Select(targetId =>
+            {
+                var inviteId = PartyState.UpsertInvite(myId, targetId, invRoomName, invRoomId, isPartyInvite: true);
+                return new
+                {
+                    ErrorCode = 0,
+                    InviteId = inviteId,
+                    SenderAccountId = myId,
+                    TargetAccountId = targetId,
+                    RoomName = invRoomName,
+                    RoomId = invRoomId,
+                    IsPartyInvite = true,
+                    CreatedAt = DateTime.UtcNow,
+                    ExpiresAt = DateTime.UtcNow.AddMinutes(5)
+                };
+            }).ToList();
+
+            return Pascal(new { ErrorCode = 0, Invites = results });
+        }
+
         [HttpPost("/api/party/v1/leave")]
         [HttpPost("/party/v1/leave")]
         public IActionResult LeaveParty()
