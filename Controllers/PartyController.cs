@@ -290,17 +290,36 @@ namespace RetroRec_Server.Controllers
 
         [HttpPost("/api/party/v1/leave")]
         [HttpPost("/party/v1/leave")]
+        [HttpPost("/api/party/v2/leave")]
+        [HttpPost("/party/v2/leave")]
         public IActionResult LeaveParty()
         {
             int myId = GetAccountIdFromAuth();
             if (myId == 0) myId = 2;
-            PartyState.MemberOf.TryRemove(myId, out _);
+
+            if (PartyState.MemberOf.TryRemove(myId, out _))
+            {
+                // I was a member — just remove myself.
+                return Ok(new { });
+            }
+
+            // I might be the leader. Dissolve the party so members aren't
+            // stuck in a ghost party whose leader has already left.
+            var memberKeys = PartyState.MemberOf
+                .Where(m => m.Value == myId)
+                .Select(m => m.Key)
+                .ToList();
+            foreach (var memberId in memberKeys)
+                PartyState.MemberOf.TryRemove(memberId, out _);
+
             return Ok(new { });
         }
 
         // Returns the current party composition. The client calls this to
         // populate the party panel. Without it the list shows empty even though
         // Leave Party is still visible.
+        // The leader is included in the Members list so the client renders
+        // the leader's own card in the party panel alongside their members.
         [HttpGet("/api/party/v1")]
         [HttpGet("/party/v1")]
         [HttpGet("/api/party/v2")]
@@ -313,11 +332,12 @@ namespace RetroRec_Server.Controllers
             // Am I a member of someone else's party?
             if (PartyState.MemberOf.TryGetValue(myId, out var leaderId))
             {
-                var coMembers = PartyState.MemberOf
+                var members = PartyState.MemberOf
                     .Where(m => m.Value == leaderId)
                     .Select(m => new { AccountId = m.Key })
+                    .Append(new { AccountId = leaderId })
                     .ToList();
-                return Pascal(new { LeaderId = leaderId, Members = coMembers });
+                return Pascal(new { LeaderId = leaderId, Members = members });
             }
 
             // Am I a leader with at least one member?
@@ -326,7 +346,12 @@ namespace RetroRec_Server.Controllers
                 .Select(m => new { AccountId = m.Key })
                 .ToList();
             if (myMembers.Count > 0)
-                return Pascal(new { LeaderId = myId, Members = myMembers });
+            {
+                var allMembers = myMembers
+                    .Append(new { AccountId = myId })
+                    .ToList();
+                return Pascal(new { LeaderId = myId, Members = allMembers });
+            }
 
             // Not in any party — return empty so the client clears the panel.
             return Pascal(new { LeaderId = 0, Members = Array.Empty<object>() });
